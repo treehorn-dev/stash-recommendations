@@ -101,6 +101,14 @@ class SourceSnapshot:
             _validate_scene(scene, index)
         for index, performer in enumerate(self.performers):
             _validate_performer(performer, index)
+        performer_ids = {performer["id"] for performer in self.performers}
+        for scene_index, scene in enumerate(self.scenes):
+            for appearance_index, appearance in enumerate(scene.get("performer_appearances", [])):
+                if appearance["performer_id"] not in performer_ids:
+                    raise ValueError(
+                        f"scenes[{scene_index}].performer_appearances[{appearance_index}] "
+                        "references performer not supplied in snapshot"
+                    )
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()

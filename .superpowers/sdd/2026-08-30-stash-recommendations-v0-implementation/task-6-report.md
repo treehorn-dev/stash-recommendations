@@ -186,3 +186,28 @@ PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests 
 node --test tests/ui/*.test.js: 1 passed
 git diff --check: clean
 ```
+
+## Fix Round 2
+
+- Store snapshot freshness truncates `source_updated_at` to PostgreSQL's
+  microsecond precision before comparison and every source projection write.
+  A guarded source-snapshot UPSERT that changes zero rows returns before any
+  relation delete/insert operations.
+- `POST /v1/catalog/snapshots` limits reads with `http.MaxBytesReader` to 1
+  MiB and returns `413` for both declared-length and chunked oversized bodies.
+- Snapshot validation rejects every performer appearance whose performer is not
+  supplied by the same snapshot, with shared Go/Python fixture coverage.
+
+TDD RED evidence: before implementation, the sub-microsecond collision
+regression replaced `tag-1` with `tag-2`; both oversized request tests returned
+`400`; and the dangling performer fixture was accepted by Go and Python.
+
+Verification after the fix:
+
+```text
+POSTGRES_TEST_DSN=... go test ./server/... -v: PASS
+PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests -q: 48 passed
+node --test tests/ui/*.test.js: 1 passed
+go vet ./server/...: PASS
+git diff --check: clean
+```

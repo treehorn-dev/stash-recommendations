@@ -172,6 +172,17 @@ func (snapshot *SourceSnapshot) Validate() error {
 			return fmt.Errorf("performers[%d]: %w", index, err)
 		}
 	}
+	performerIDs := make(map[string]struct{}, len(snapshot.Performers))
+	for _, performer := range snapshot.Performers {
+		performerIDs[performer.ID] = struct{}{}
+	}
+	for sceneIndex, scene := range snapshot.Scenes {
+		for appearanceIndex, appearance := range scene.PerformerAppearances {
+			if _, exists := performerIDs[appearance.PerformerID]; !exists {
+				return fmt.Errorf("scenes[%d].performer_appearances[%d] references performer not supplied in snapshot", sceneIndex, appearanceIndex)
+			}
+		}
+	}
 	return nil
 }
 

@@ -79,6 +79,33 @@ func TestSnapshotUpsertTreatsEqualSourceVersionsAsNoOpIncludingRelations(t *test
 	}}, scene.Performers)
 }
 
+func TestSnapshotUpsertTreatsSubMicrosecondSourceVersionsAsEqual(t *testing.T) {
+	repository := openSnapshotStore(t)
+	service := catalog.NewSnapshotService(repository)
+	ctx := context.Background()
+
+	// PostgreSQL stores timestamps at microsecond precision, so these two source
+	// versions must be treated as the same version before replacing relations.
+	require.NoError(t, service.Upsert(ctx, richSnapshotJSON(t, "2026-08-30T11:00:00Z", "2026-08-30T10:00:00.000000100Z")))
+	require.NoError(t, service.Upsert(ctx, richSnapshotJSONWithReplacementRelations(t, "2026-08-30T12:00:00Z", "2026-08-30T10:00:00.000000900Z")))
+
+	scene, found, err := repository.CatalogSource(ctx, domain.ContentKey{
+		Endpoint: "https://box.example/graphql",
+		StashID:  "scene-1",
+	})
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "Example Scene", scene.Title)
+	require.Equal(t, []catalog.EntityReference{{
+		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "tag-1"},
+		Name:       "Tag",
+	}}, scene.Tags)
+	require.Equal(t, []catalog.EntityReference{{
+		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "performer-1"},
+		Name:       "Performer",
+	}}, scene.Performers)
+}
+
 func TestSnapshotUpsertProjectsRelationsAndCanonicalURL(t *testing.T) {
 	repository := openSnapshotStore(t)
 	service := catalog.NewSnapshotService(repository)
