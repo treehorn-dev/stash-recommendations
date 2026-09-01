@@ -9,4 +9,4 @@ test-python:
 	python -m pytest plugin/stashRecommendations/tests
 
 test-ui:
-	node --test tests/ui/smoke.test.js
+	node --test tests/ui/*.test.js
