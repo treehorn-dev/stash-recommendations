@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/treehorn/stash-recommendations/server/internal/auth"
+	"github.com/treehorn/stash-recommendations/server/internal/domain"
 )
 
 //go:embed migrations/*.sql
@@ -29,6 +31,7 @@ var migrations = []migration{
 }
 
 var ErrInvalidAPIKey = errors.New("invalid API key")
+var ErrInteractionEventConflict = errors.New("interaction event conflict")
 
 type Account struct {
 	ID        string
@@ -173,4 +176,182 @@ func (store *Store) Authenticate(ctx context.Context, plaintextKey string) (Acco
 		return Account{}, ErrInvalidAPIKey
 	}
 	return account, nil
+}
+
+func (store *Store) AcceptInteractionEvent(ctx context.Context, accountID string, event domain.PreferenceEvent, bodyHash []byte) (bool, error) {
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return false, fmt.Errorf("begin interaction transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	inserted, err := insertInteractionEvent(ctx, tx, accountID, event, bodyHash)
+	if err != nil {
+		return false, err
+	}
+	if !inserted {
+		return false, nil
+	}
+
+	if isRatingEvent(event.Kind) {
+		if err := applyCurrentPreference(ctx, tx, accountID, event); err != nil {
+			return false, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit interaction transaction: %w", err)
+	}
+	return true, nil
+}
+
+func insertInteractionEvent(ctx context.Context, tx pgx.Tx, accountID string, event domain.PreferenceEvent, bodyHash []byte) (bool, error) {
+	var (
+		rowsAffected int64
+		err          error
+		tableName    string
+	)
+
+	switch event.Kind {
+	case domain.PreferenceEventKindSceneRatingSet, domain.PreferenceEventKindSceneRatingRemove:
+		tableName = "preference_events"
+		commandTag, execErr := tx.Exec(ctx, `
+			INSERT INTO preference_events (
+				account_id,
+				event_id,
+				client_id,
+				sequence,
+				endpoint,
+				stash_id,
+				kind,
+				rating,
+				occurred_at,
+				origin,
+				body_hash
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT (account_id, event_id) DO NOTHING
+		`,
+			accountID,
+			event.EventID,
+			event.ClientID,
+			event.Sequence,
+			event.ContentKey.Endpoint,
+			event.ContentKey.StashID,
+			event.Kind,
+			event.Rating,
+			event.OccurredAt,
+			event.Origin,
+			bodyHash,
+		)
+		err = execErr
+		rowsAffected = commandTag.RowsAffected()
+	case domain.PreferenceEventKindScenePlayed, domain.PreferenceEventKindSceneO:
+		tableName = "engagement_events"
+		commandTag, execErr := tx.Exec(ctx, `
+			INSERT INTO engagement_events (
+				account_id,
+				event_id,
+				client_id,
+				sequence,
+				endpoint,
+				stash_id,
+				kind,
+				occurred_at,
+				origin,
+				body_hash
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			ON CONFLICT (account_id, event_id) DO NOTHING
+		`,
+			accountID,
+			event.EventID,
+			event.ClientID,
+			event.Sequence,
+			event.ContentKey.Endpoint,
+			event.ContentKey.StashID,
+			event.Kind,
+			event.OccurredAt,
+			event.Origin,
+			bodyHash,
+		)
+		err = execErr
+		rowsAffected = commandTag.RowsAffected()
+	default:
+		return false, fmt.Errorf("unsupported interaction event kind %q", event.Kind)
+	}
+	if err != nil {
+		return false, fmt.Errorf("insert %s: %w", tableName, err)
+	}
+	if rowsAffected == 1 {
+		return true, nil
+	}
+
+	var existingHash []byte
+	if err := tx.QueryRow(ctx, fmt.Sprintf("SELECT body_hash FROM %s WHERE account_id = $1 AND event_id = $2", tableName), accountID, event.EventID).Scan(&existingHash); err != nil {
+		return false, fmt.Errorf("load existing %s replay: %w", tableName, err)
+	}
+	if bytes.Equal(existingHash, bodyHash) {
+		return false, nil
+	}
+	return false, ErrInteractionEventConflict
+}
+
+func applyCurrentPreference(ctx context.Context, tx pgx.Tx, accountID string, event domain.PreferenceEvent) error {
+	switch event.Kind {
+	case domain.PreferenceEventKindSceneRatingSet:
+		_, err := tx.Exec(ctx, `
+			INSERT INTO current_preferences (
+				account_id,
+				endpoint,
+				stash_id,
+				rating,
+				client_id,
+				sequence,
+				occurred_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT (account_id, endpoint, stash_id) DO UPDATE
+			SET
+				rating = EXCLUDED.rating,
+				client_id = EXCLUDED.client_id,
+				sequence = EXCLUDED.sequence,
+				occurred_at = EXCLUDED.occurred_at
+			WHERE current_preferences.sequence < EXCLUDED.sequence
+				OR (current_preferences.sequence = EXCLUDED.sequence AND current_preferences.client_id < EXCLUDED.client_id)
+		`,
+			accountID,
+			event.ContentKey.Endpoint,
+			event.ContentKey.StashID,
+			event.Rating,
+			event.ClientID,
+			event.Sequence,
+			event.OccurredAt,
+		)
+		if err != nil {
+			return fmt.Errorf("upsert current preference: %w", err)
+		}
+	case domain.PreferenceEventKindSceneRatingRemove:
+		_, err := tx.Exec(ctx, `
+			DELETE FROM current_preferences
+			WHERE account_id = $1
+				AND endpoint = $2
+				AND stash_id = $3
+				AND (
+					sequence < $4
+					OR (sequence = $4 AND client_id < $5)
+				)
+		`,
+			accountID,
+			event.ContentKey.Endpoint,
+			event.ContentKey.StashID,
+			event.Sequence,
+			event.ClientID,
+		)
+		if err != nil {
+			return fmt.Errorf("delete current preference: %w", err)
+		}
+	}
+	return nil
+}
+
+func isRatingEvent(kind string) bool {
+	return kind == domain.PreferenceEventKindSceneRatingSet || kind == domain.PreferenceEventKindSceneRatingRemove
 }
