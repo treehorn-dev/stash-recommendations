@@ -446,7 +446,7 @@ func (store *Store) UpsertSnapshot(ctx context.Context, snapshot domain.SourceSn
 	if err != nil {
 		return err
 	}
-	if exists && currentVersion.After(snapshot.CapturedAt) {
+	if exists && !snapshot.SourceUpdatedAt.After(currentVersion) {
 		return nil
 	}
 
@@ -474,8 +474,8 @@ func (store *Store) UpsertSnapshot(ctx context.Context, snapshot domain.SourceSn
 			source_updated_at = EXCLUDED.source_updated_at,
 			snapshot = EXCLUDED.snapshot
 		WHERE source_snapshots.source_updated_at IS NULL
-			OR source_snapshots.source_updated_at <= EXCLUDED.source_updated_at
-	`, snapshot.ContentKey.Endpoint, snapshot.ContentKey.StashID, snapshot.SchemaVersion, snapshot.CapturedAt, snapshot.CapturedAt, []byte(raw)); err != nil {
+			OR source_snapshots.source_updated_at < EXCLUDED.source_updated_at
+	`, snapshot.ContentKey.Endpoint, snapshot.ContentKey.StashID, snapshot.SchemaVersion, snapshot.CapturedAt, snapshot.SourceUpdatedAt, []byte(raw)); err != nil {
 		return fmt.Errorf("upsert source snapshot: %w", err)
 	}
 
@@ -528,8 +528,8 @@ func (store *Store) UpsertSnapshot(ctx context.Context, snapshot domain.SourceSn
 				remote_images = EXCLUDED.remote_images,
 				source_updated_at = EXCLUDED.source_updated_at
 			WHERE source_performers.source_updated_at IS NULL
-				OR source_performers.source_updated_at <= EXCLUDED.source_updated_at
-		`, snapshot.ContentKey.Endpoint, performer.ID, performer.Name, aliases, performer.Gender, performer.Country, performer.Ethnicity, performer.EyeColor, performer.HairColor, performer.Measurements, careerYears, urls, remoteImages, snapshot.CapturedAt); err != nil {
+				OR source_performers.source_updated_at < EXCLUDED.source_updated_at
+		`, snapshot.ContentKey.Endpoint, performer.ID, performer.Name, aliases, performer.Gender, performer.Country, performer.Ethnicity, performer.EyeColor, performer.HairColor, performer.Measurements, careerYears, urls, remoteImages, snapshot.SourceUpdatedAt); err != nil {
 			return fmt.Errorf("upsert source performer %s: %w", performer.ID, err)
 		}
 	}
@@ -561,8 +561,8 @@ func (store *Store) UpsertSnapshot(ctx context.Context, snapshot domain.SourceSn
 					name = EXCLUDED.name,
 					source_updated_at = EXCLUDED.source_updated_at
 				WHERE source_studios.source_updated_at IS NULL
-					OR source_studios.source_updated_at <= EXCLUDED.source_updated_at
-			`, snapshot.ContentKey.Endpoint, scene.Studio.ID, scene.Studio.Name, snapshot.CapturedAt); err != nil {
+					OR source_studios.source_updated_at < EXCLUDED.source_updated_at
+			`, snapshot.ContentKey.Endpoint, scene.Studio.ID, scene.Studio.Name, snapshot.SourceUpdatedAt); err != nil {
 				return fmt.Errorf("upsert source studio %s: %w", scene.Studio.ID, err)
 			}
 		}
@@ -597,8 +597,8 @@ func (store *Store) UpsertSnapshot(ctx context.Context, snapshot domain.SourceSn
 				source_updated_at = EXCLUDED.source_updated_at,
 				remote_images = EXCLUDED.remote_images
 			WHERE source_scenes.source_updated_at IS NULL
-				OR source_scenes.source_updated_at <= EXCLUDED.source_updated_at
-		`, snapshot.ContentKey.Endpoint, scene.ID, scene.Title, scene.Details, dates, urls, scene.Duration, scene.Director, scene.Code, studioEndpoint, studioStashID, snapshot.CapturedAt, remoteImages); err != nil {
+				OR source_scenes.source_updated_at < EXCLUDED.source_updated_at
+		`, snapshot.ContentKey.Endpoint, scene.ID, scene.Title, scene.Details, dates, urls, scene.Duration, scene.Director, scene.Code, studioEndpoint, studioStashID, snapshot.SourceUpdatedAt, remoteImages); err != nil {
 			return fmt.Errorf("upsert source scene %s: %w", scene.ID, err)
 		}
 
@@ -637,8 +637,8 @@ func (store *Store) UpsertSnapshot(ctx context.Context, snapshot domain.SourceSn
 					name = EXCLUDED.name,
 					source_updated_at = EXCLUDED.source_updated_at
 				WHERE source_tags.source_updated_at IS NULL
-					OR source_tags.source_updated_at <= EXCLUDED.source_updated_at
-			`, snapshot.ContentKey.Endpoint, tag.ID, tag.Name, snapshot.CapturedAt); err != nil {
+					OR source_tags.source_updated_at < EXCLUDED.source_updated_at
+			`, snapshot.ContentKey.Endpoint, tag.ID, tag.Name, snapshot.SourceUpdatedAt); err != nil {
 				return fmt.Errorf("upsert source tag %s: %w", tag.ID, err)
 			}
 			if _, err := tx.Exec(ctx, `

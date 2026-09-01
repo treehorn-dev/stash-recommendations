@@ -138,11 +138,12 @@ func (event *PreferenceEvent) UnmarshalJSON(data []byte) error {
 }
 
 type SourceSnapshot struct {
-	SchemaVersion int         `json:"schema_version"`
-	ContentKey    ContentKey  `json:"content_key"`
-	CapturedAt    time.Time   `json:"captured_at"`
-	Scenes        []Scene     `json:"scenes"`
-	Performers    []Performer `json:"performers"`
+	SchemaVersion   int         `json:"schema_version"`
+	ContentKey      ContentKey  `json:"content_key"`
+	CapturedAt      time.Time   `json:"captured_at"`
+	SourceUpdatedAt time.Time   `json:"source_updated_at"`
+	Scenes          []Scene     `json:"scenes"`
+	Performers      []Performer `json:"performers"`
 }
 
 func (snapshot *SourceSnapshot) Validate() error {
@@ -151,6 +152,9 @@ func (snapshot *SourceSnapshot) Validate() error {
 	}
 	if snapshot.CapturedAt.IsZero() {
 		return fmt.Errorf("captured_at is required")
+	}
+	if snapshot.SourceUpdatedAt.IsZero() {
+		return fmt.Errorf("source_updated_at is required")
 	}
 	if err := snapshot.ContentKey.NormalizeInPlace(); err != nil {
 		return fmt.Errorf("content_key: %w", err)
@@ -172,7 +176,7 @@ func (snapshot *SourceSnapshot) Validate() error {
 }
 
 func (snapshot *SourceSnapshot) UnmarshalJSON(data []byte) error {
-	if err := rejectNullFields(data, "schema_version", "content_key", "captured_at", "scenes", "performers"); err != nil {
+	if err := rejectNullFields(data, "schema_version", "content_key", "captured_at", "source_updated_at", "scenes", "performers"); err != nil {
 		return err
 	}
 	type sourceSnapshot SourceSnapshot

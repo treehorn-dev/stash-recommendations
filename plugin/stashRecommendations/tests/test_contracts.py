@@ -29,6 +29,7 @@ def test_source_snapshot_schema_requires_public_https_references() -> None:
     assert schema["$defs"]["content_key"]["properties"]["endpoint"]["pattern"] == r"^[Hh][Tt][Tt][Pp][Ss]://[^/?#@]+(?:/[^?#]*)?$"
     assert schema["$defs"]["scene"]["properties"]["urls"]["items"] == {"$ref": "#/$defs/https_reference"}
     assert schema["$defs"]["performer"]["properties"]["remote_images"]["items"] == {"$ref": "#/$defs/https_reference"}
+    assert "source_updated_at" in schema["required"]
 
 
 def test_rating_remove_serializes_without_rating() -> None:
@@ -55,6 +56,7 @@ def test_snapshot_construction_rejects_privacy_fields(field: str) -> None:
             schema_version=1,
             content_key=ContentKey.normalize("https://box.example/graphql", "scene-1"),
             captured_at=datetime.now(timezone.utc),
+            source_updated_at=datetime.now(timezone.utc),
             scenes=[{"id": "scene-1", field: "private"}],
             performers=[],
         )
@@ -66,6 +68,7 @@ def test_snapshot_construction_requires_arrays_and_nested_required_fields() -> N
             schema_version=1,
             content_key=ContentKey.normalize("https://box.example/graphql", "scene-1"),
             captured_at=datetime.now(timezone.utc),
+            source_updated_at=datetime.now(timezone.utc),
             scenes=None,
             performers=[],
         )
@@ -75,6 +78,7 @@ def test_snapshot_construction_requires_arrays_and_nested_required_fields() -> N
             schema_version=1,
             content_key=ContentKey.normalize("https://box.example/graphql", "scene-1"),
             captured_at=datetime.now(timezone.utc),
+            source_updated_at=datetime.now(timezone.utc),
             scenes=[{}],
             performers=[{"id": "performer-1"}],
         )
@@ -85,6 +89,7 @@ def test_snapshot_serializes_schema_valid_arrays() -> None:
         schema_version=1,
         content_key=ContentKey.normalize("https://box.example/graphql", "scene-1"),
         captured_at=datetime.now(timezone.utc),
+        source_updated_at=datetime.now(timezone.utc),
         scenes=[{"id": "scene-1"}],
         performers=[{"id": "performer-1", "name": "Performer"}],
     )
@@ -93,6 +98,8 @@ def test_snapshot_serializes_schema_valid_arrays() -> None:
 
     assert isinstance(payload["scenes"], list)
     assert isinstance(payload["performers"], list)
+    assert payload["captured_at"].endswith("Z")
+    assert payload["source_updated_at"].endswith("Z")
 
 
 @pytest.mark.parametrize(
@@ -153,6 +160,7 @@ def test_snapshot_rejects_invalid_allowed_field_types(scene: dict[str, object], 
             schema_version=1,
             content_key=ContentKey.normalize("https://box.example/graphql", "scene-1"),
             captured_at=datetime.now(timezone.utc),
+            source_updated_at=datetime.now(timezone.utc),
             scenes=[scene],
             performers=performers,
         )
@@ -197,6 +205,7 @@ def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, v
     ("fixture_name", "valid"),
     [
         ("source-snapshot.valid.json", True),
+        ("source-snapshot.missing-source-updated-at.invalid.json", False),
         ("source-snapshot.boolean-duration.invalid.json", False),
         ("source-snapshot.scalar-dates.invalid.json", False),
         ("source-snapshot.invalid-date.invalid.json", False),
@@ -213,12 +222,19 @@ def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, v
 def test_snapshot_fixtures_have_cross_language_contract_parity(fixture_name: str, valid: bool) -> None:
     payload = _load_fixture(fixture_name)
     captured_at = datetime.fromisoformat(payload.pop("captured_at").replace("Z", "+00:00"))
+    source_updated_at_value = payload.pop("source_updated_at", None)
+    source_updated_at = (
+        datetime.fromisoformat(source_updated_at_value.replace("Z", "+00:00"))
+        if source_updated_at_value is not None
+        else None
+    )
     content_key = ContentKey(**payload.pop("content_key"))
 
     if valid:
         SourceSnapshot(
             **payload,
             captured_at=captured_at,
+            source_updated_at=source_updated_at,
             content_key=content_key,
         )
     else:
@@ -226,6 +242,7 @@ def test_snapshot_fixtures_have_cross_language_contract_parity(fixture_name: str
             SourceSnapshot(
                 **payload,
                 captured_at=captured_at,
+                source_updated_at=source_updated_at,
                 content_key=content_key,
             )
 
