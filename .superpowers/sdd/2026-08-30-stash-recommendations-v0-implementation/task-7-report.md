@@ -257,3 +257,68 @@ configuration change was made.
 - Added: `server/internal/store/migrations/008_source_catalog_groups.sql`.
 
 Concern: none. Task 8 has not started.
+
+## Fix Round 3/5
+
+Addressed the remaining Task 7 contract mismatch only.
+
+- Tightened the shared `source-snapshot` JSON Schema so `groups[].id` and
+  `groups[].name` must contain at least one non-whitespace character, matching
+  the existing Go and Python runtime validators.
+- Added dedicated shared fixtures for a valid grouped snapshot and an invalid
+  blank/whitespace group snapshot.
+- Extended both Go and Python fixture-parity suites to exercise those fixtures,
+  and added an explicit Python schema assertion for the new group patterns.
+
+### TDD evidence
+
+RED:
+
+```bash
+env PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests/test_contracts.py -q
+```
+
+Result: failed at
+`test_source_snapshot_schema_requires_public_https_references` with
+`KeyError: 'pattern'` for `schema["$defs"]["group"]["properties"]["id"]`,
+proving the shared schema did not yet enforce the runtime's non-blank group
+constraint.
+
+The Go fixture parity suite already rejected the new invalid fixture before the
+schema change:
+
+```bash
+go test ./server/internal/domain -run TestV1FixturesHaveCrossLanguageContractParity -count=1
+```
+
+Result: PASS, confirming the defect was schema/runtime mismatch rather than a
+runtime-validator gap.
+
+GREEN:
+
+```bash
+env PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests/test_contracts.py -q
+```
+
+Result: 50 passed.
+
+```bash
+go test ./server/internal/domain -run TestV1FixturesHaveCrossLanguageContractParity -count=1
+```
+
+Result: PASS.
+
+### Verification
+
+- `go test ./server/internal/domain -count=1`: PASS.
+- `env PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests/test_contracts.py -q`: 50 passed.
+- `go vet ./server/...`: PASS.
+- `git diff --check`: clean.
+
+### Files
+
+- Changed: shared source snapshot schema, Go/Python contract parity tests.
+- Added: `contracts/v1/fixtures/source-snapshot.group.valid.json`,
+  `contracts/v1/fixtures/source-snapshot.blank-group.invalid.json`.
+
+Concern: none. Task 8 has not started.

@@ -19,7 +19,7 @@
     "performer": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"type": "string", "minLength": 1}, "name": {"type": "string"}, "aliases": {"type": "array", "items": {"type": "string"}}, "gender": {"type": "string"}, "country": {"type": "string"}, "ethnicity": {"type": "string"}, "eye_color": {"type": "string"}, "hair_color": {"type": "string"}, "measurements": {"type": "string"}, "career_years": {"type": "array", "items": {"type": "integer"}}, "urls": {"type": "array", "items": {"$ref": "#/$defs/https_reference"}}, "remote_images": {"type": "array", "items": {"$ref": "#/$defs/https_reference"}}}},
     "studio": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}}},
     "tag": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}}},
-    "group": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}}},
+    "group": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"type": "string", "pattern": ".*\\S.*"}, "name": {"type": "string", "pattern": ".*\\S.*"}}},
     "performer_appearance": {"type": "object", "additionalProperties": false, "required": ["performer_id"], "properties": {"performer_id": {"type": "string", "minLength": 1}}}
   }
 }
