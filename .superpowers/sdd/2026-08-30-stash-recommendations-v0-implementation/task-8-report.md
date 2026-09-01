@@ -124,3 +124,31 @@ Result: clean.
 ### Concerns
 
 None.
+
+### Scoped Re-review
+
+Reviewer verdict: the nullable-`event_id` mutation-key finding is addressed.
+`OutboxItem` now carries a durable `row_id`, mutation paths target SQLite
+`id`, protocol `event_id` remains preserved for preference-event idempotency,
+and the added regression tests cover snapshot retry/ack and hook quarantine.
+No new Critical or Important breakage was found in the fix diff.
+
+### Controller Verification
+
+```bash
+PYTHONPATH=plugin/stashRecommendations /private/tmp/stashrec-pytest-venv/bin/python -m pytest plugin/stashRecommendations/tests/test_outbox.py -q
+```
+
+Result: PASS, `5 passed in 0.07s`.
+
+```bash
+PYTHONPATH=plugin/stashRecommendations /private/tmp/stashrec-pytest-venv/bin/pytest plugin/stashRecommendations/tests -q
+```
+
+Result: PASS, `62 passed in 0.12s`.
+
+```bash
+git diff --check
+```
+
+Result: clean.
