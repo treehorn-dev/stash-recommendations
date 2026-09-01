@@ -32,9 +32,9 @@ func (ContentKey) Normalize(endpoint, stashID string) (ContentKey, error) {
 		return ContentKey{}, fmt.Errorf("stash ID is required")
 	}
 
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return ContentKey{}, fmt.Errorf("endpoint must be an absolute URL")
+	parsed, err := parsePublicHTTPSURL(endpoint)
+	if err != nil {
+		return ContentKey{}, fmt.Errorf("endpoint: %w", err)
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = strings.ToLower(parsed.Host)
@@ -222,6 +222,12 @@ func (scene *Scene) Validate() error {
 			return fmt.Errorf("dates[%d] must be a valid date", index)
 		}
 	}
+	if err := validatePublicHTTPSReferences("urls", scene.URLs); err != nil {
+		return err
+	}
+	if err := validatePublicHTTPSReferences("remote_images", scene.RemoteImages); err != nil {
+		return err
+	}
 	for index, tag := range scene.Tags {
 		if strings.TrimSpace(tag.ID) == "" || strings.TrimSpace(tag.Name) == "" {
 			return fmt.Errorf("tags[%d] id and name are required", index)
@@ -266,6 +272,12 @@ type Performer struct {
 func (performer *Performer) Validate() error {
 	if strings.TrimSpace(performer.ID) == "" || strings.TrimSpace(performer.Name) == "" {
 		return fmt.Errorf("performer id and name are required")
+	}
+	if err := validatePublicHTTPSReferences("urls", performer.URLs); err != nil {
+		return err
+	}
+	if err := validatePublicHTTPSReferences("remote_images", performer.RemoteImages); err != nil {
+		return err
 	}
 	return nil
 }
@@ -359,4 +371,24 @@ func rejectNullFields(data []byte, fields ...string) error {
 		}
 	}
 	return nil
+}
+
+func validatePublicHTTPSReferences(field string, values []string) error {
+	for index, value := range values {
+		if _, err := parsePublicHTTPSURL(value); err != nil {
+			return fmt.Errorf("%s[%d]: %w", field, index, err)
+		}
+	}
+	return nil
+}
+
+func parsePublicHTTPSURL(value string) (*url.URL, error) {
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" {
+		return nil, fmt.Errorf("must be an absolute HTTPS URL")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, fmt.Errorf("must not contain credentials, query, or fragment")
+	}
+	return parsed, nil
 }

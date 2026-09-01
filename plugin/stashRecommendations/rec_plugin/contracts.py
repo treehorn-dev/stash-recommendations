@@ -23,12 +23,10 @@ class ContentKey:
     def normalize(cls, endpoint: str, stash_id: str) -> "ContentKey":
         if not isinstance(endpoint, str) or not isinstance(stash_id, str) or not stash_id.strip():
             raise ValueError("stash_id is required")
-        parsed = urlparse(endpoint)
-        if not parsed.scheme or not parsed.netloc:
-            raise ValueError("endpoint must be an absolute URL")
+        parsed = _parse_public_https_url(endpoint)
         path = parsed.path[:-1] if parsed.path.endswith("/") else parsed.path
         return cls(
-            endpoint=urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.params, parsed.query, parsed.fragment)),
+            endpoint=urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.params, "", "")),
             stash_id=stash_id,
         )
 
@@ -116,8 +114,8 @@ def _validate_scene(scene: object, index: int) -> None:
         raise ValueError(f"scenes[{index}] scene id is required")
     _validate_optional_strings(scene, index, {"title", "details", "director", "code"})
     _validate_date_values(scene, index)
-    _validate_string_collection(scene, index, "urls")
-    _validate_string_collection(scene, index, "remote_images")
+    _validate_https_reference_collection(scene, index, "urls")
+    _validate_https_reference_collection(scene, index, "remote_images")
     if "duration" in scene and (type(scene["duration"]) is not int or scene["duration"] < 0):
         raise ValueError(f"scenes[{index}].duration must be a non-negative integer")
     if "studio" in scene:
@@ -138,8 +136,10 @@ def _validate_performer(performer: object, index: int) -> None:
     if not isinstance(performer.get("id"), str) or not performer["id"].strip() or not isinstance(performer.get("name"), str) or not performer["name"].strip():
         raise ValueError(f"performers[{index}] performer id and name are required")
     _validate_optional_strings(performer, index, {"gender", "country", "ethnicity", "eye_color", "hair_color", "measurements"}, "performers")
-    for field in ("aliases", "urls", "remote_images"):
+    for field in ("aliases",):
         _validate_string_collection(performer, index, field, "performers")
+    for field in ("urls", "remote_images"):
+        _validate_https_reference_collection(performer, index, field, "performers")
     career_years = _collection(performer, index, "career_years", "performers")
     for year_index, year in enumerate(career_years):
         if type(year) is not int:
@@ -178,6 +178,16 @@ def _validate_string_collection(record: dict[str, Any], index: int, field: str, 
             raise ValueError(f"{collection_name}[{index}].{field}[{value_index}] must be a string")
 
 
+def _validate_https_reference_collection(record: dict[str, Any], index: int, field: str, collection_name: str = "scenes") -> None:
+    for value_index, value in enumerate(_collection(record, index, field, collection_name)):
+        if not isinstance(value, str):
+            raise ValueError(f"{collection_name}[{index}].{field}[{value_index}] must be a string")
+        try:
+            _parse_public_https_url(value)
+        except ValueError as error:
+            raise ValueError(f"{collection_name}[{index}].{field}[{value_index}] must be a public HTTPS URL") from error
+
+
 def _validate_date_values(scene: dict[str, Any], index: int) -> None:
     for date_index, value in enumerate(_collection(scene, index, "dates")):
         if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -186,3 +196,16 @@ def _validate_date_values(scene: dict[str, Any], index: int) -> None:
             date.fromisoformat(value)
         except ValueError as error:
             raise ValueError(f"scenes[{index}].dates[{date_index}] must be a valid date") from error
+
+
+def _parse_public_https_url(value: str):
+    try:
+        parsed = urlparse(value)
+        username = parsed.username
+    except ValueError as error:
+        raise ValueError("must be an absolute HTTPS URL") from error
+    if parsed.scheme.lower() != "https" or not parsed.netloc:
+        raise ValueError("must be an absolute HTTPS URL")
+    if username is not None or parsed.query or parsed.fragment:
+        raise ValueError("must not contain credentials, query, or fragment")
+    return parsed

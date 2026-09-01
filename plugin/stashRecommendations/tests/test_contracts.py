@@ -21,6 +21,15 @@ def test_preference_event_schema_restricts_v1_interactions_to_utc_timestamps() -
     assert schema["additionalProperties"] is False
 
 
+def test_source_snapshot_schema_requires_public_https_references() -> None:
+    schema_path = Path(__file__).parents[3] / "contracts" / "v1" / "source-snapshot.schema.json"
+    schema = json.loads(schema_path.read_text())
+
+    assert schema["$defs"]["content_key"]["properties"]["endpoint"]["pattern"] == r"^https://[^/?#@]+(?:/[^?#]*)?$"
+    assert schema["$defs"]["scene"]["properties"]["urls"]["items"] == {"$ref": "#/$defs/https_reference"}
+    assert schema["$defs"]["performer"]["properties"]["remote_images"]["items"] == {"$ref": "#/$defs/https_reference"}
+
+
 def test_rating_remove_serializes_without_rating() -> None:
     event = PreferenceEvent(
         schema_version=1,
@@ -158,6 +167,9 @@ def test_snapshot_rejects_invalid_allowed_field_types(scene: dict[str, object], 
         ("interaction-event.o.valid.json", True),
         ("interaction-event.with-rating.invalid.json", False),
         ("interaction-event.non-utc-timestamp.invalid.json", False),
+        ("interaction-event.credential-endpoint.invalid.json", False),
+        ("interaction-event.query-fragment-endpoint.invalid.json", False),
+        ("interaction-event.http-endpoint.invalid.json", False),
     ],
 )
 def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, valid: bool) -> None:
@@ -186,6 +198,10 @@ def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, v
         ("source-snapshot.invalid-date.invalid.json", False),
         ("source-snapshot.nested-null.invalid.json", False),
         ("source-snapshot.boolean-career-years.invalid.json", False),
+        ("source-snapshot.invalid-remote-url.invalid.json", False),
+        ("source-snapshot.credential-remote-image.invalid.json", False),
+        ("source-snapshot.query-fragment-remote-reference.invalid.json", False),
+        ("source-snapshot.http-remote-reference.invalid.json", False),
     ],
 )
 def test_snapshot_fixtures_have_cross_language_contract_parity(fixture_name: str, valid: bool) -> None:
