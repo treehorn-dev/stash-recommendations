@@ -22,3 +22,28 @@ Final verification:
 
 The plan's `make test-server` target is absent from the bootstrap Makefile;
 the equivalent full server command above was run directly.
+
+## Fix Round 1
+
+Changed bearer keys to `srk_<public-id>.<secret>`. The public identifier is
+independently random, persisted under the unique indexed `api_keys.key_id`,
+and used to select exactly one candidate before Argon2id verifies the secret.
+No bearer value is logged or persisted in plaintext.
+
+TDD evidence:
+
+- RED: the new parser/storage tests initially failed because `ParseAPIKey` did
+  not exist; after implementation, the storage test correctly exposed the
+  prior compose volume as pre-identifier schema (`column "key_id" does not
+  exist`).
+- GREEN: recreated the disposable PostgreSQL compose volume to validate the
+  fresh v0 initial migration. Focused auth/store/http tests passed, including
+  two independently issued account keys resolving to their own contexts and an
+  arbitrary bearer returning `401`.
+
+Final verification:
+
+- `POSTGRES_TEST_DSN=postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable go test ./server/... -v`: PASS.
+- `PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests -q`: `46 passed`.
+- `node --test tests/ui/*.test.js`: PASS, `1` test.
+- `git diff --check`: clean.
