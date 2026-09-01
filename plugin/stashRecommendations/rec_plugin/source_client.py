@@ -32,6 +32,12 @@ query FindScene($id: ID!) {
       id
       name
     }
+    groups {
+      group {
+        id
+        name
+      }
+    }
     images {
       url
     }

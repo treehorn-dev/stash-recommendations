@@ -27,6 +27,7 @@ def test_to_source_snapshot_maps_stash_box_scene_without_local_only_fields() -> 
             "updated": "2026-08-31T00:00:00Z",
             "studio": {"id": "studio-1", "name": "Studio"},
             "tags": [{"id": "tag-1", "name": "Tag"}],
+            "groups": [{"group": {"id": "group-1", "name": "Group"}}],
             "images": [{"url": "https://images.example/scene.jpg"}],
             "performers": [
                 {
@@ -72,6 +73,7 @@ def test_to_source_snapshot_maps_stash_box_scene_without_local_only_fields() -> 
             "code": "CODE-1",
             "studio": {"id": "studio-1", "name": "Studio"},
             "tags": [{"id": "tag-1", "name": "Tag"}],
+            "groups": [{"id": "group-1", "name": "Group"}],
             "performer_appearances": [{"performer_id": "performer-1"}],
             "remote_images": ["https://images.example/scene.jpg"],
         }

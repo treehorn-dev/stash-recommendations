@@ -87,3 +87,48 @@ Result: clean.
 Independent review has not been performed. This report stops at the Task 9
 implementer checkpoint, with delivery/UI and end-to-end work left for later
 tasks.
+
+## Fix Round 1
+
+External review found one scoped Task 9 gap: the configured Stash-box
+`findScene` query did not request scene group relationships, so group-derived
+catalog signals could never enter the captured source snapshot even though the
+shared contract, snapshot mapper, and downstream model support them.
+
+### RED
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests/test_source_client.py -q
+```
+
+Result before the fix: FAIL, `2 failed, 1 passed`.
+
+Failures proved:
+- the configured source query text omitted `groups`
+- schema-compatible `groups { group { id name } }` relationships were not
+  asserted anywhere in the source client contract
+
+Snapshot regression coverage was added at the same time and already passed,
+confirming the mapper retained the approved relationship shape once present.
+
+### GREEN
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests/test_source_client.py plugin/stashRecommendations/tests/test_snapshots.py -q
+```
+
+Result after the fix: PASS, `5 passed in 0.04s`.
+
+### Verification
+
+```bash
+make test-plugin
+```
+
+Result: PASS, `77 passed in 0.16s`.
+
+```bash
+git diff --check
+```
+
+Result: clean.
