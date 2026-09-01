@@ -240,7 +240,7 @@ git diff --check
 ### Commits
 
 - `7f0fbcd` `fix: serialize concurrent session rebuilds`
-- Pending evidence commit
+- `ba5dec6` `docs: record task 5 fix round 1 evidence`
 
 ### Verification Limitations
 
