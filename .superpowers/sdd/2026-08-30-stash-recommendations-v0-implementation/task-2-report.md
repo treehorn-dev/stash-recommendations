@@ -160,3 +160,45 @@
 ### Commit
 
 - `a4af556 fix: enforce strict interaction contract parity`
+
+## Fix Round 3: Invalid Semantic Date Fixture
+
+### Changed Paths
+
+- `contracts/v1/fixtures/source-snapshot.invalid-date.invalid.json`: adds an impossible but syntactically date-shaped scene date, `2026-02-30`.
+- `server/internal/domain/types_test.go`: adds the fixture to the Go snapshot parity table.
+- `plugin/stashRecommendations/tests/test_contracts.py`: adds the fixture to the Python snapshot parity table.
+
+### RED Evidence
+
+1. `go test ./server/internal/domain -run TestV1FixturesHaveCrossLanguageContractParity -v`
+
+   Output: `FAIL` because `source-snapshot.invalid-date.invalid.json` did not exist; all existing fixture cases passed.
+
+2. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py -k snapshot_fixtures`
+
+   Output: `1 failed, 5 passed`; the sole failure was the missing shared fixture.
+
+### GREEN Evidence
+
+1. `go test ./server/internal/domain -v`
+
+   Output: `PASS`, including `source-snapshot.invalid-date.invalid.json` rejected by the Go validator.
+
+2. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py`
+
+   Output: `31 passed in 0.06s`.
+
+3. `git diff --check`
+
+   Output: exit `0` with no output.
+
+### Self-Review
+
+- The new fixture remains structurally valid JSON and uses a string matching the `YYYY-MM-DD` shape, so it verifies semantic calendar validation rather than scalar-type rejection.
+- Both Go and Python load the same fixture through their existing parity tables and reject it.
+- No production, design, plan, or Task 3+ files changed.
+
+### Commit
+
+- `20d5797 test: add invalid source date fixture`
