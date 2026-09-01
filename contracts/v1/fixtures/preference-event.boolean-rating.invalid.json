@@ -1,0 +1,1 @@
+{"schema_version":1,"event_id":"550e8400-e29b-41d4-a716-446655440000","client_id":"550e8400-e29b-41d4-a716-446655440001","sequence":7,"occurred_at":"2026-08-30T00:00:00Z","content_key":{"endpoint":"https://box.example/graphql","stash_id":"scene-1"},"kind":"scene.rating.set","rating":true,"origin":"hook"}

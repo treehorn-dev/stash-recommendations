@@ -9,15 +9,15 @@
     "event_id": {"type": "string", "format": "uuid"},
     "client_id": {"type": "string", "format": "uuid"},
     "sequence": {"type": "integer", "minimum": 1},
-    "occurred_at": {"type": "string", "format": "date-time"},
+    "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
     "content_key": {"$ref": "#/$defs/content_key"},
-    "kind": {"enum": ["scene.rating.set", "scene.rating.remove"]},
+    "kind": {"enum": ["scene.rating.set", "scene.rating.remove", "scene.played", "scene.o"]},
     "rating": {"type": "number", "minimum": 0, "maximum": 1},
     "origin": {"type": "string", "minLength": 1}
   },
   "allOf": [
     {"if": {"properties": {"kind": {"const": "scene.rating.set"}}}, "then": {"required": ["rating"]}},
-    {"if": {"properties": {"kind": {"const": "scene.rating.remove"}}}, "then": {"not": {"required": ["rating"]}}}
+    {"if": {"properties": {"kind": {"enum": ["scene.rating.remove", "scene.played", "scene.o"]}}}, "then": {"not": {"required": ["rating"]}}}
   ],
   "$defs": {
     "content_key": {
