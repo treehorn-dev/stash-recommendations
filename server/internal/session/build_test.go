@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,6 +177,77 @@ func TestRebuildCollapsesOnlyConsecutiveRepeats(t *testing.T) {
 	}, loadProjectionItems(t, pool, accountID, projectionTypeLatency))
 }
 
+func TestRebuildConcurrentCallsAllocateDistinctProjectionVersions(t *testing.T) {
+	builder, pool := openSessionTestStore(t)
+	accountID := seedAccount(t, pool)
+	base := time.Date(2026, time.August, 30, 10, 0, 0, 0, time.UTC)
+
+	seedEngagementEvent(t, pool, accountID, engagementSeed{
+		eventID:    "550e8400-e29b-41d4-a716-44665544010d",
+		clientID:   "550e8400-e29b-41d4-a716-446655440001",
+		sequence:   1,
+		endpoint:   "https://box.example/graphql",
+		stashID:    "scene-1",
+		kind:       "scene.played",
+		occurredAt: base,
+	})
+	seedEngagementEvent(t, pool, accountID, engagementSeed{
+		eventID:    "550e8400-e29b-41d4-a716-44665544010e",
+		clientID:   "550e8400-e29b-41d4-a716-446655440001",
+		sequence:   2,
+		endpoint:   "https://box.example/graphql",
+		stashID:    "scene-2",
+		kind:       "scene.o",
+		occurredAt: base.Add(time.Minute),
+	})
+
+	firstAllocated := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondAllocated := make(chan struct{})
+	var hookMu sync.Mutex
+	callCount := 0
+	builder.afterVersionAllocated = func() {
+		hookMu.Lock()
+		callCount++
+		currentCall := callCount
+		hookMu.Unlock()
+
+		switch currentCall {
+		case 1:
+			close(firstAllocated)
+			<-releaseFirst
+		case 2:
+			close(secondAllocated)
+		}
+	}
+
+	errs := make(chan error, 2)
+	go func() {
+		errs <- builder.Rebuild(context.Background(), accountID)
+	}()
+
+	<-firstAllocated
+	go func() {
+		errs <- builder.Rebuild(context.Background(), accountID)
+	}()
+
+	select {
+	case <-secondAllocated:
+	case <-time.After(time.Second):
+	}
+	close(releaseFirst)
+
+	firstErr := <-errs
+	secondErr := <-errs
+	require.NoError(t, firstErr)
+	require.NoError(t, secondErr)
+	require.Equal(t, []int64{1, 2}, loadProjectionVersions(t, pool, accountID))
+	require.Equal(t, []projectedItem{
+		{version: 2, projectionType: projectionTypeLatency, sessionOrder: 1, itemOrder: 1, stashID: "scene-1", kind: "scene.played"},
+		{version: 2, projectionType: projectionTypeLatency, sessionOrder: 1, itemOrder: 2, stashID: "scene-2", kind: "scene.o"},
+	}, loadLatestProjectionItems(t, pool, accountID, projectionTypeLatency))
+}
+
 type engagementSeed struct {
 	eventID    string
 	clientID   string
@@ -298,4 +371,48 @@ func loadProjectionItems(t *testing.T, pool *pgxpool.Pool, accountID string, pro
 	}
 	require.NoError(t, rows.Err())
 	return items
+}
+
+func loadProjectionVersions(t *testing.T, pool *pgxpool.Pool, accountID string) []int64 {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `
+		SELECT DISTINCT projection_version
+		FROM session_projections
+		WHERE account_id = $1
+		ORDER BY projection_version
+	`, accountID)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var versions []int64
+	for rows.Next() {
+		var version int64
+		require.NoError(t, rows.Scan(&version))
+		versions = append(versions, version)
+	}
+	require.NoError(t, rows.Err())
+	return versions
+}
+
+func loadLatestProjectionItems(t *testing.T, pool *pgxpool.Pool, accountID string, projectionType string) []projectedItem {
+	t.Helper()
+	items := loadProjectionItems(t, pool, accountID, projectionType)
+	if len(items) == 0 {
+		return nil
+	}
+
+	latestVersion := items[len(items)-1].version
+	var latest []projectedItem
+	for _, item := range items {
+		if item.version == latestVersion {
+			latest = append(latest, item)
+		}
+	}
+	sort.Slice(latest, func(i, j int) bool {
+		if latest[i].sessionOrder != latest[j].sessionOrder {
+			return latest[i].sessionOrder < latest[j].sessionOrder
+		}
+		return latest[i].itemOrder < latest[j].itemOrder
+	})
+	return latest
 }
