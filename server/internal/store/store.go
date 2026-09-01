@@ -84,7 +84,11 @@ func (store *Store) CreateAccount(ctx context.Context) (IssuedAccount, error) {
 	if err != nil {
 		return IssuedAccount{}, err
 	}
-	hash, err := auth.HashAPIKey(plaintextKey)
+	keyID, secret, ok := auth.ParseAPIKey(plaintextKey)
+	if !ok {
+		return IssuedAccount{}, fmt.Errorf("generated invalid API key")
+	}
+	hash, err := auth.HashAPIKey(secret)
 	if err != nil {
 		return IssuedAccount{}, err
 	}
@@ -99,7 +103,7 @@ func (store *Store) CreateAccount(ctx context.Context) (IssuedAccount, error) {
 	if err := tx.QueryRow(ctx, "INSERT INTO accounts DEFAULT VALUES RETURNING id, created_at").Scan(&account.ID, &account.CreatedAt); err != nil {
 		return IssuedAccount{}, fmt.Errorf("create account: %w", err)
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO api_keys (account_id, key_hash) VALUES ($1, $2)", account.ID, hash); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO api_keys (account_id, key_id, key_hash) VALUES ($1, $2, $3)", account.ID, keyID, hash); err != nil {
 		return IssuedAccount{}, fmt.Errorf("create API key: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -109,32 +113,27 @@ func (store *Store) CreateAccount(ctx context.Context) (IssuedAccount, error) {
 }
 
 func (store *Store) Authenticate(ctx context.Context, plaintextKey string) (Account, error) {
-	if strings.TrimSpace(plaintextKey) == "" {
+	keyID, secret, ok := auth.ParseAPIKey(plaintextKey)
+	if !ok {
 		return Account{}, ErrInvalidAPIKey
 	}
 
-	rows, err := store.pool.Query(ctx, `
+	var account Account
+	var hash string
+	err := store.pool.QueryRow(ctx, `
 		SELECT accounts.id, accounts.created_at, api_keys.key_hash
 		FROM api_keys
 		JOIN accounts ON accounts.id = api_keys.account_id
-	`)
+		WHERE api_keys.key_id = $1
+	`, keyID).Scan(&account.ID, &account.CreatedAt, &hash)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Account{}, ErrInvalidAPIKey
+		}
 		return Account{}, fmt.Errorf("query API keys: %w", err)
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var account Account
-		var hash string
-		if err := rows.Scan(&account.ID, &account.CreatedAt, &hash); err != nil {
-			return Account{}, fmt.Errorf("scan API key: %w", err)
-		}
-		if auth.VerifyAPIKey(hash, plaintextKey) {
-			return account, nil
-		}
+	if !auth.VerifyAPIKey(hash, secret) {
+		return Account{}, ErrInvalidAPIKey
 	}
-	if err := rows.Err(); err != nil {
-		return Account{}, fmt.Errorf("iterate API keys: %w", err)
-	}
-	return Account{}, ErrInvalidAPIKey
+	return account, nil
 }
