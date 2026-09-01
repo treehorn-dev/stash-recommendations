@@ -2,7 +2,7 @@ package store
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,8 +13,18 @@ import (
 	"github.com/treehorn/stash-recommendations/server/internal/auth"
 )
 
-//go:embed migrations/001_initial.sql
-var initialMigration string
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
+
+type migration struct {
+	version string
+	path    string
+}
+
+var migrations = []migration{
+	{version: "001_initial", path: "migrations/001_initial.sql"},
+	{version: "002_api_key_identifier", path: "migrations/002_api_key_identifier.sql"},
+}
 
 var ErrInvalidAPIKey = errors.New("invalid API key")
 
@@ -63,14 +73,39 @@ func (store *Store) Migrate(ctx context.Context) error {
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(62096831461253021)); err != nil {
 		return fmt.Errorf("lock initial migration: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version TEXT PRIMARY KEY,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		return fmt.Errorf("create migration ledger: %w", err)
+	}
 
-	for _, statement := range strings.Split(initialMigration, ";") {
-		statement = strings.TrimSpace(statement)
-		if statement == "" {
+	for _, migration := range migrations {
+		var applied bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)", migration.version).Scan(&applied); err != nil {
+			return fmt.Errorf("check migration %s: %w", migration.version, err)
+		}
+		if applied {
 			continue
 		}
-		if _, err := tx.Exec(ctx, statement); err != nil {
-			return fmt.Errorf("apply initial migration: %w", err)
+
+		contents, err := migrationFiles.ReadFile(migration.path)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", migration.version, err)
+		}
+		for _, statement := range strings.Split(string(contents), ";") {
+			statement = strings.TrimSpace(statement)
+			if statement == "" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, statement); err != nil {
+				return fmt.Errorf("apply migration %s: %w", migration.version, err)
+			}
+		}
+		if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", migration.version); err != nil {
+			return fmt.Errorf("record migration %s: %w", migration.version, err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {

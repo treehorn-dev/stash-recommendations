@@ -2,8 +2,12 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/treehorn/stash-recommendations/server/internal/auth"
@@ -67,4 +71,95 @@ func TestCreateAccountStoresHashUnderAPIKeyIdentifier(t *testing.T) {
 		identifier,
 	).Scan(&storedHash))
 	require.True(t, auth.VerifyAPIKey(storedHash, secret))
+}
+
+func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
+	repository := openIsolatedMigrationStore(t)
+	ctx := context.Background()
+	legacyAccountID, legacyKeyID, err := seedLegacyAPIKeySchema(ctx, repository)
+	require.NoError(t, err)
+
+	require.NoError(t, repository.Migrate(ctx))
+	var backfilledKeyID string
+	require.NoError(t, repository.pool.QueryRow(ctx, "SELECT key_id FROM api_keys WHERE account_id = $1", legacyAccountID).Scan(&backfilledKeyID))
+	require.Equal(t, "legacy_"+strings.ReplaceAll(legacyKeyID, "-", ""), backfilledKeyID)
+
+	account, err := repository.CreateAccount(ctx)
+	require.NoError(t, err)
+	authenticated, err := repository.Authenticate(ctx, account.PlaintextKey)
+	require.NoError(t, err)
+	require.Equal(t, account.ID, authenticated.ID)
+
+	rows, err := repository.pool.Query(ctx, "SELECT version FROM schema_migrations ORDER BY version")
+	require.NoError(t, err)
+	defer rows.Close()
+	var versions []string
+	for rows.Next() {
+		var version string
+		require.NoError(t, rows.Scan(&version))
+		versions = append(versions, version)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier"}, versions)
+}
+
+func openIsolatedMigrationStore(t *testing.T) *Store {
+	t.Helper()
+	dsn := os.Getenv("POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("POSTGRES_TEST_DSN is required for PostgreSQL integration tests")
+	}
+
+	admin, err := Open(context.Background(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { admin.Close(context.Background()) })
+	schema := fmt.Sprintf("task3_migration_%d", time.Now().UnixNano())
+	_, err = admin.pool.Exec(context.Background(), "CREATE SCHEMA "+schema)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := admin.pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+		require.NoError(t, err)
+	})
+
+	schemaDSN, err := url.Parse(dsn)
+	require.NoError(t, err)
+	query := schemaDSN.Query()
+	query.Set("search_path", schema)
+	schemaDSN.RawQuery = query.Encode()
+	repository, err := Open(context.Background(), schemaDSN.String())
+	require.NoError(t, err)
+	t.Cleanup(func() { repository.Close(context.Background()) })
+	return repository
+}
+
+func seedLegacyAPIKeySchema(ctx context.Context, repository *Store) (string, string, error) {
+	_, err := repository.pool.Exec(ctx, `
+		CREATE EXTENSION IF NOT EXISTS pgcrypto;
+		CREATE TABLE accounts (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);
+		CREATE TABLE api_keys (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+			key_hash TEXT NOT NULL UNIQUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);
+	`)
+	if err != nil {
+		return "", "", err
+	}
+	var accountID string
+	if err := repository.pool.QueryRow(ctx, "INSERT INTO accounts DEFAULT VALUES RETURNING id").Scan(&accountID); err != nil {
+		return "", "", err
+	}
+	hash, err := auth.HashAPIKey("legacy-bearer-format")
+	if err != nil {
+		return "", "", err
+	}
+	var keyID string
+	if err := repository.pool.QueryRow(ctx, "INSERT INTO api_keys (account_id, key_hash) VALUES ($1, $2) RETURNING id", accountID, hash).Scan(&keyID); err != nil {
+		return "", "", err
+	}
+	return accountID, keyID, nil
 }
