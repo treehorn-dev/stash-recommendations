@@ -177,6 +177,68 @@ func TestRebuildCollapsesOnlyConsecutiveRepeats(t *testing.T) {
 	}, loadProjectionItems(t, pool, accountID, projectionTypeLatency))
 }
 
+func TestRebuildOrdersEqualTimestampLatencyEventsByEventID(t *testing.T) {
+	builder, pool := openSessionTestStore(t)
+	accountID := seedAccount(t, pool)
+	occurredAt := time.Date(2026, time.August, 30, 10, 0, 0, 0, time.UTC)
+
+	seedEngagementEvent(t, pool, accountID, engagementSeed{
+		eventID:    "550e8400-e29b-41d4-a716-446655440202",
+		clientID:   "550e8400-e29b-41d4-a716-446655440001",
+		sequence:   2,
+		endpoint:   "https://box.example/graphql",
+		stashID:    "scene-2",
+		kind:       "scene.played",
+		occurredAt: occurredAt,
+	})
+	seedEngagementEvent(t, pool, accountID, engagementSeed{
+		eventID:    "550e8400-e29b-41d4-a716-446655440201",
+		clientID:   "550e8400-e29b-41d4-a716-446655440001",
+		sequence:   1,
+		endpoint:   "https://box.example/graphql",
+		stashID:    "scene-1",
+		kind:       "scene.played",
+		occurredAt: occurredAt,
+	})
+
+	require.NoError(t, builder.Rebuild(context.Background(), accountID))
+	require.Equal(t, []projectedItem{
+		{version: 1, projectionType: projectionTypeLatency, sessionOrder: 1, itemOrder: 1, stashID: "scene-1", kind: "scene.played"},
+		{version: 1, projectionType: projectionTypeLatency, sessionOrder: 1, itemOrder: 2, stashID: "scene-2", kind: "scene.played"},
+	}, loadProjectionItems(t, pool, accountID, projectionTypeLatency))
+}
+
+func TestRebuildOrdersEqualTimestampOBoundedEventsByEventID(t *testing.T) {
+	builder, pool := openSessionTestStore(t)
+	accountID := seedAccount(t, pool)
+	occurredAt := time.Date(2026, time.August, 30, 10, 0, 0, 0, time.UTC)
+
+	seedEngagementEvent(t, pool, accountID, engagementSeed{
+		eventID:    "550e8400-e29b-41d4-a716-446655440302",
+		clientID:   "550e8400-e29b-41d4-a716-446655440001",
+		sequence:   2,
+		endpoint:   "https://box.example/graphql",
+		stashID:    "scene-2",
+		kind:       "scene.o",
+		occurredAt: occurredAt,
+	})
+	seedEngagementEvent(t, pool, accountID, engagementSeed{
+		eventID:    "550e8400-e29b-41d4-a716-446655440301",
+		clientID:   "550e8400-e29b-41d4-a716-446655440001",
+		sequence:   1,
+		endpoint:   "https://box.example/graphql",
+		stashID:    "scene-1",
+		kind:       "scene.played",
+		occurredAt: occurredAt,
+	})
+
+	require.NoError(t, builder.Rebuild(context.Background(), accountID))
+	require.Equal(t, []projectedItem{
+		{version: 1, projectionType: projectionTypeOBounded, sessionOrder: 1, itemOrder: 1, stashID: "scene-1", kind: "scene.played"},
+		{version: 1, projectionType: projectionTypeOBounded, sessionOrder: 1, itemOrder: 2, stashID: "scene-2", kind: "scene.o"},
+	}, loadProjectionItems(t, pool, accountID, projectionTypeOBounded))
+}
+
 func TestRebuildConcurrentCallsAllocateDistinctProjectionVersions(t *testing.T) {
 	builder, pool := openSessionTestStore(t)
 	accountID := seedAccount(t, pool)

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import socket
+from urllib import error
 
 from rec_plugin.contracts import ContentKey, PreferenceEvent, SourceSnapshot
 from rec_plugin.delivery import DeliveryWorker, ServiceResponse
 from rec_plugin import outbox as outbox_module
 from rec_plugin.outbox import Outbox
+from rec_plugin.service_client import ServiceClient
+from rec_plugin.settings import Settings
 from recommendations import run
 
 
@@ -98,6 +102,30 @@ def test_network_and_5xx_errors_retry_without_quarantine(tmp_path: Path, monkeyp
     assert status["pending"]["rating"] == 1
     assert status["quarantined"]["rating"] == 0
     assert status["last_error"] == "server busy"
+
+
+def test_service_client_timeout_reaches_retry_without_quarantine(tmp_path: Path, monkeypatch: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    outbox = seeded_outbox(tmp_path)
+
+    def fake_urlopen(http_request: object, timeout: float) -> object:
+        del http_request, timeout
+        raise error.URLError(socket.timeout("timed out"))
+
+    monkeypatch.setattr("rec_plugin.service_client.request.urlopen", fake_urlopen)
+    client = ServiceClient(
+        Settings(service_url="https://stashrec.example", api_key="secret-api-key", show_remote_results=False)
+    )
+
+    result = DeliveryWorker(outbox, client).deliver_ready(NOW)
+    status = outbox.status()
+
+    assert result.retried == 1
+    assert result.delivered == 0
+    assert result.quarantined == 0
+    assert status["pending"]["rating"] == 1
+    assert status["quarantined"]["rating"] == 0
+    assert status["last_error"] == "timed out"
 
 
 def test_fetch_related_mode_merges_unique_results_across_content_keys(tmp_path: Path, monkeypatch: object) -> None:

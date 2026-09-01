@@ -4,12 +4,13 @@ from dataclasses import dataclass
 import json
 import time
 from typing import Any, Callable, Mapping
-from urllib import request
+from urllib import error, request
 
 from rec_plugin.contracts import ContentKey
 
 
 Transport = Callable[[str, str, str, dict[str, object]], dict[str, object]]
+HTTP_TIMEOUT_SECONDS = 15.0
 
 SCENE_QUERY = """
 query FindScene($id: ID!) {
@@ -154,5 +155,8 @@ def _default_transport(url: str, api_key: str, query: str, variables: dict[str, 
         headers={"Content-Type": "application/json", "ApiKey": api_key},
         method="POST",
     )
-    with request.urlopen(http_request) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with request.urlopen(http_request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except error.URLError as exc:
+        raise OSError(str(exc.reason)) from exc
