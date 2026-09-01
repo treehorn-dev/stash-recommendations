@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/treehorn/stash-recommendations/server/internal/auth"
+	"github.com/treehorn/stash-recommendations/server/internal/catalog"
 	"github.com/treehorn/stash-recommendations/server/internal/domain"
 )
 
@@ -29,6 +31,7 @@ var migrations = []migration{
 	{version: "003_legacy_api_key_auth", path: "migrations/003_legacy_api_key_auth.sql"},
 	{version: "004_revoke_legacy_api_keys", path: "migrations/004_revoke_legacy_api_keys.sql"},
 	{version: "005_session_projections", path: "migrations/005_session_projections.sql"},
+	{version: "006_source_catalog_projections", path: "migrations/006_source_catalog_projections.sql"},
 }
 
 var ErrInvalidAPIKey = errors.New("invalid API key")
@@ -68,6 +71,10 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 
 func (store *Store) Close(context.Context) {
 	store.pool.Close()
+}
+
+func (store *Store) Pool() *pgxpool.Pool {
+	return store.pool
 }
 
 func (store *Store) Migrate(ctx context.Context) error {
@@ -422,4 +429,378 @@ func hasStrictlyNewerPreferenceEvent(ctx context.Context, tx pgx.Tx, accountID s
 		return false, fmt.Errorf("query newer preference events: %w", err)
 	}
 	return exists, nil
+}
+
+func (store *Store) UpsertSnapshot(ctx context.Context, snapshot domain.SourceSnapshot, raw json.RawMessage) error {
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin source snapshot transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", snapshot.ContentKey.Endpoint, snapshot.ContentKey.StashID); err != nil {
+		return fmt.Errorf("lock source snapshot: %w", err)
+	}
+
+	currentVersion, exists, err := currentSourceSnapshotVersion(ctx, tx, snapshot.ContentKey)
+	if err != nil {
+		return err
+	}
+	if exists && currentVersion.After(snapshot.CapturedAt) {
+		return nil
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO source_configs (endpoint)
+		VALUES ($1)
+		ON CONFLICT (endpoint) DO NOTHING
+	`, snapshot.ContentKey.Endpoint); err != nil {
+		return fmt.Errorf("ensure source config: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO source_snapshots (
+			endpoint,
+			stash_id,
+			schema_version,
+			captured_at,
+			source_updated_at,
+			snapshot
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+		ON CONFLICT (endpoint, stash_id) DO UPDATE
+		SET
+			schema_version = EXCLUDED.schema_version,
+			captured_at = EXCLUDED.captured_at,
+			source_updated_at = EXCLUDED.source_updated_at,
+			snapshot = EXCLUDED.snapshot
+		WHERE source_snapshots.source_updated_at IS NULL
+			OR source_snapshots.source_updated_at <= EXCLUDED.source_updated_at
+	`, snapshot.ContentKey.Endpoint, snapshot.ContentKey.StashID, snapshot.SchemaVersion, snapshot.CapturedAt, snapshot.CapturedAt, []byte(raw)); err != nil {
+		return fmt.Errorf("upsert source snapshot: %w", err)
+	}
+
+	for _, performer := range snapshot.Performers {
+		aliases, err := json.Marshal(performer.Aliases)
+		if err != nil {
+			return fmt.Errorf("marshal performer aliases: %w", err)
+		}
+		careerYears, err := json.Marshal(performer.CareerYears)
+		if err != nil {
+			return fmt.Errorf("marshal performer career years: %w", err)
+		}
+		urls, err := json.Marshal(performer.URLs)
+		if err != nil {
+			return fmt.Errorf("marshal performer urls: %w", err)
+		}
+		remoteImages, err := json.Marshal(performer.RemoteImages)
+		if err != nil {
+			return fmt.Errorf("marshal performer remote images: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO source_performers (
+				endpoint,
+				stash_id,
+				name,
+				aliases,
+				gender,
+				country,
+				ethnicity,
+				eye_color,
+				hair_color,
+				measurements,
+				career_years,
+				urls,
+				remote_images,
+				source_updated_at
+			) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14)
+			ON CONFLICT (endpoint, stash_id) DO UPDATE
+			SET
+				name = EXCLUDED.name,
+				aliases = EXCLUDED.aliases,
+				gender = EXCLUDED.gender,
+				country = EXCLUDED.country,
+				ethnicity = EXCLUDED.ethnicity,
+				eye_color = EXCLUDED.eye_color,
+				hair_color = EXCLUDED.hair_color,
+				measurements = EXCLUDED.measurements,
+				career_years = EXCLUDED.career_years,
+				urls = EXCLUDED.urls,
+				remote_images = EXCLUDED.remote_images,
+				source_updated_at = EXCLUDED.source_updated_at
+			WHERE source_performers.source_updated_at IS NULL
+				OR source_performers.source_updated_at <= EXCLUDED.source_updated_at
+		`, snapshot.ContentKey.Endpoint, performer.ID, performer.Name, aliases, performer.Gender, performer.Country, performer.Ethnicity, performer.EyeColor, performer.HairColor, performer.Measurements, careerYears, urls, remoteImages, snapshot.CapturedAt); err != nil {
+			return fmt.Errorf("upsert source performer %s: %w", performer.ID, err)
+		}
+	}
+
+	for _, scene := range snapshot.Scenes {
+		dates, err := json.Marshal(scene.Dates)
+		if err != nil {
+			return fmt.Errorf("marshal scene dates: %w", err)
+		}
+		urls, err := json.Marshal(scene.URLs)
+		if err != nil {
+			return fmt.Errorf("marshal scene urls: %w", err)
+		}
+		remoteImages, err := json.Marshal(scene.RemoteImages)
+		if err != nil {
+			return fmt.Errorf("marshal scene remote images: %w", err)
+		}
+
+		var studioEndpoint any
+		var studioStashID any
+		if scene.Studio != nil {
+			studioEndpoint = snapshot.ContentKey.Endpoint
+			studioStashID = scene.Studio.ID
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO source_studios (endpoint, stash_id, name, source_updated_at)
+				VALUES ($1, $2, $3, $4)
+				ON CONFLICT (endpoint, stash_id) DO UPDATE
+				SET
+					name = EXCLUDED.name,
+					source_updated_at = EXCLUDED.source_updated_at
+				WHERE source_studios.source_updated_at IS NULL
+					OR source_studios.source_updated_at <= EXCLUDED.source_updated_at
+			`, snapshot.ContentKey.Endpoint, scene.Studio.ID, scene.Studio.Name, snapshot.CapturedAt); err != nil {
+				return fmt.Errorf("upsert source studio %s: %w", scene.Studio.ID, err)
+			}
+		}
+
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO source_scenes (
+				endpoint,
+				stash_id,
+				title,
+				details,
+				dates,
+				urls,
+				duration,
+				director,
+				code,
+				studio_endpoint,
+				studio_stash_id,
+				source_updated_at,
+				remote_images
+			) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12, $13::jsonb)
+			ON CONFLICT (endpoint, stash_id) DO UPDATE
+			SET
+				title = EXCLUDED.title,
+				details = EXCLUDED.details,
+				dates = EXCLUDED.dates,
+				urls = EXCLUDED.urls,
+				duration = EXCLUDED.duration,
+				director = EXCLUDED.director,
+				code = EXCLUDED.code,
+				studio_endpoint = EXCLUDED.studio_endpoint,
+				studio_stash_id = EXCLUDED.studio_stash_id,
+				source_updated_at = EXCLUDED.source_updated_at,
+				remote_images = EXCLUDED.remote_images
+			WHERE source_scenes.source_updated_at IS NULL
+				OR source_scenes.source_updated_at <= EXCLUDED.source_updated_at
+		`, snapshot.ContentKey.Endpoint, scene.ID, scene.Title, scene.Details, dates, urls, scene.Duration, scene.Director, scene.Code, studioEndpoint, studioStashID, snapshot.CapturedAt, remoteImages); err != nil {
+			return fmt.Errorf("upsert source scene %s: %w", scene.ID, err)
+		}
+
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM source_scene_performers
+			WHERE scene_endpoint = $1 AND scene_stash_id = $2
+		`, snapshot.ContentKey.Endpoint, scene.ID); err != nil {
+			return fmt.Errorf("clear source scene performers %s: %w", scene.ID, err)
+		}
+		for index, appearance := range scene.PerformerAppearances {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO source_scene_performers (
+					scene_endpoint,
+					scene_stash_id,
+					performer_endpoint,
+					performer_stash_id,
+					appearance_order
+				) VALUES ($1, $2, $3, $4, $5)
+			`, snapshot.ContentKey.Endpoint, scene.ID, snapshot.ContentKey.Endpoint, appearance.PerformerID, index+1); err != nil {
+				return fmt.Errorf("insert source scene performer %s/%s: %w", scene.ID, appearance.PerformerID, err)
+			}
+		}
+
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM source_scene_tags
+			WHERE scene_endpoint = $1 AND scene_stash_id = $2
+		`, snapshot.ContentKey.Endpoint, scene.ID); err != nil {
+			return fmt.Errorf("clear source scene tags %s: %w", scene.ID, err)
+		}
+		for index, tag := range scene.Tags {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO source_tags (endpoint, stash_id, name, source_updated_at)
+				VALUES ($1, $2, $3, $4)
+				ON CONFLICT (endpoint, stash_id) DO UPDATE
+				SET
+					name = EXCLUDED.name,
+					source_updated_at = EXCLUDED.source_updated_at
+				WHERE source_tags.source_updated_at IS NULL
+					OR source_tags.source_updated_at <= EXCLUDED.source_updated_at
+			`, snapshot.ContentKey.Endpoint, tag.ID, tag.Name, snapshot.CapturedAt); err != nil {
+				return fmt.Errorf("upsert source tag %s: %w", tag.ID, err)
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO source_scene_tags (
+					scene_endpoint,
+					scene_stash_id,
+					tag_endpoint,
+					tag_stash_id,
+					tag_order
+				) VALUES ($1, $2, $3, $4, $5)
+			`, snapshot.ContentKey.Endpoint, scene.ID, snapshot.ContentKey.Endpoint, tag.ID, index+1); err != nil {
+				return fmt.Errorf("insert source scene tag %s/%s: %w", scene.ID, tag.ID, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit source snapshot transaction: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) CatalogSource(ctx context.Context, key domain.ContentKey) (catalog.Source, bool, error) {
+	var (
+		source                 catalog.Source
+		datesJSON              []byte
+		urlsJSON               []byte
+		remoteImagesJSON       []byte
+		canonicalSceneTemplate *string
+		studioEndpoint         *string
+		studioStashID          *string
+	)
+
+	err := store.pool.QueryRow(ctx, `
+		SELECT
+			source_scenes.title,
+			source_scenes.details,
+			source_scenes.dates,
+			source_scenes.urls,
+			source_scenes.duration,
+			source_scenes.director,
+			source_scenes.code,
+			source_scenes.remote_images,
+			source_scenes.studio_endpoint,
+			source_scenes.studio_stash_id,
+			source_configs.canonical_scene_url_template
+		FROM source_scenes
+		LEFT JOIN source_configs ON source_configs.endpoint = source_scenes.endpoint
+		WHERE source_scenes.endpoint = $1 AND source_scenes.stash_id = $2
+	`, key.Endpoint, key.StashID).Scan(
+		&source.Title,
+		&source.Details,
+		&datesJSON,
+		&urlsJSON,
+		&source.Duration,
+		&source.Director,
+		&source.Code,
+		&remoteImagesJSON,
+		&studioEndpoint,
+		&studioStashID,
+		&canonicalSceneTemplate,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.Source{}, false, nil
+		}
+		return catalog.Source{}, false, fmt.Errorf("query source scene: %w", err)
+	}
+
+	source.ContentKey = key
+	if err := json.Unmarshal(datesJSON, &source.Dates); err != nil {
+		return catalog.Source{}, false, fmt.Errorf("decode source scene dates: %w", err)
+	}
+	if err := json.Unmarshal(urlsJSON, &source.URLs); err != nil {
+		return catalog.Source{}, false, fmt.Errorf("decode source scene urls: %w", err)
+	}
+	if err := json.Unmarshal(remoteImagesJSON, &source.RemoteImages); err != nil {
+		return catalog.Source{}, false, fmt.Errorf("decode source scene remote images: %w", err)
+	}
+
+	if studioEndpoint != nil && studioStashID != nil {
+		var studio catalog.EntityReference
+		studio.ContentKey = domain.ContentKey{Endpoint: *studioEndpoint, StashID: *studioStashID}
+		if err := store.pool.QueryRow(ctx, `
+			SELECT name
+			FROM source_studios
+			WHERE endpoint = $1 AND stash_id = $2
+		`, *studioEndpoint, *studioStashID).Scan(&studio.Name); err != nil {
+			return catalog.Source{}, false, fmt.Errorf("query source studio: %w", err)
+		}
+		source.Studio = &studio
+	}
+
+	performerRows, err := store.pool.Query(ctx, `
+		SELECT source_performers.endpoint, source_performers.stash_id, source_performers.name
+		FROM source_scene_performers
+		JOIN source_performers
+			ON source_performers.endpoint = source_scene_performers.performer_endpoint
+			AND source_performers.stash_id = source_scene_performers.performer_stash_id
+		WHERE source_scene_performers.scene_endpoint = $1 AND source_scene_performers.scene_stash_id = $2
+		ORDER BY source_scene_performers.appearance_order
+	`, key.Endpoint, key.StashID)
+	if err != nil {
+		return catalog.Source{}, false, fmt.Errorf("query source performers: %w", err)
+	}
+	defer performerRows.Close()
+	for performerRows.Next() {
+		var performer catalog.EntityReference
+		if err := performerRows.Scan(&performer.ContentKey.Endpoint, &performer.ContentKey.StashID, &performer.Name); err != nil {
+			return catalog.Source{}, false, fmt.Errorf("scan source performer: %w", err)
+		}
+		source.Performers = append(source.Performers, performer)
+	}
+	if err := performerRows.Err(); err != nil {
+		return catalog.Source{}, false, fmt.Errorf("iterate source performers: %w", err)
+	}
+
+	tagRows, err := store.pool.Query(ctx, `
+		SELECT source_tags.endpoint, source_tags.stash_id, source_tags.name
+		FROM source_scene_tags
+		JOIN source_tags
+			ON source_tags.endpoint = source_scene_tags.tag_endpoint
+			AND source_tags.stash_id = source_scene_tags.tag_stash_id
+		WHERE source_scene_tags.scene_endpoint = $1 AND source_scene_tags.scene_stash_id = $2
+		ORDER BY source_scene_tags.tag_order
+	`, key.Endpoint, key.StashID)
+	if err != nil {
+		return catalog.Source{}, false, fmt.Errorf("query source tags: %w", err)
+	}
+	defer tagRows.Close()
+	for tagRows.Next() {
+		var tag catalog.EntityReference
+		if err := tagRows.Scan(&tag.ContentKey.Endpoint, &tag.ContentKey.StashID, &tag.Name); err != nil {
+			return catalog.Source{}, false, fmt.Errorf("scan source tag: %w", err)
+		}
+		source.Tags = append(source.Tags, tag)
+	}
+	if err := tagRows.Err(); err != nil {
+		return catalog.Source{}, false, fmt.Errorf("iterate source tags: %w", err)
+	}
+
+	if canonicalSceneTemplate != nil {
+		canonicalURL := strings.ReplaceAll(*canonicalSceneTemplate, "{stash_id}", key.StashID)
+		canonicalURL = strings.ReplaceAll(canonicalURL, "{id}", key.StashID)
+		source.CanonicalURL = &canonicalURL
+	}
+
+	return source, true, nil
+}
+
+func currentSourceSnapshotVersion(ctx context.Context, tx pgx.Tx, key domain.ContentKey) (time.Time, bool, error) {
+	var sourceUpdatedAt time.Time
+	err := tx.QueryRow(ctx, `
+		SELECT source_updated_at
+		FROM source_snapshots
+		WHERE endpoint = $1 AND stash_id = $2
+	`, key.Endpoint, key.StashID).Scan(&sourceUpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, false, nil
+		}
+		return time.Time{}, false, fmt.Errorf("query source snapshot version: %w", err)
+	}
+	return sourceUpdatedAt, true, nil
 }

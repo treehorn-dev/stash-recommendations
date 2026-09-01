@@ -102,6 +102,13 @@ CREATE TABLE IF NOT EXISTS source_scenes (
     stash_id TEXT NOT NULL,
     title TEXT,
     details TEXT,
+    dates JSONB NOT NULL DEFAULT '[]'::jsonb,
+    urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+    duration INTEGER,
+    director TEXT,
+    code TEXT,
+    studio_endpoint TEXT,
+    studio_stash_id TEXT,
     source_updated_at TIMESTAMPTZ,
     remote_images JSONB NOT NULL DEFAULT '[]'::jsonb,
     PRIMARY KEY (endpoint, stash_id)
@@ -111,6 +118,16 @@ CREATE TABLE IF NOT EXISTS source_performers (
     endpoint TEXT NOT NULL,
     stash_id TEXT NOT NULL,
     name TEXT NOT NULL,
+    aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+    gender TEXT,
+    country TEXT,
+    ethnicity TEXT,
+    eye_color TEXT,
+    hair_color TEXT,
+    measurements TEXT,
+    career_years JSONB NOT NULL DEFAULT '[]'::jsonb,
+    urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+    remote_images JSONB NOT NULL DEFAULT '[]'::jsonb,
     source_updated_at TIMESTAMPTZ,
     PRIMARY KEY (endpoint, stash_id)
 );
@@ -136,6 +153,7 @@ CREATE TABLE IF NOT EXISTS source_scene_performers (
     scene_stash_id TEXT NOT NULL,
     performer_endpoint TEXT NOT NULL,
     performer_stash_id TEXT NOT NULL,
+    appearance_order INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (scene_endpoint, scene_stash_id, performer_endpoint, performer_stash_id)
 );
 
@@ -144,6 +162,7 @@ CREATE TABLE IF NOT EXISTS source_scene_tags (
     scene_stash_id TEXT NOT NULL,
     tag_endpoint TEXT NOT NULL,
     tag_stash_id TEXT NOT NULL,
+    tag_order INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (scene_endpoint, scene_stash_id, tag_endpoint, tag_stash_id)
 );
 

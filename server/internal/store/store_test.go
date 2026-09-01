@@ -111,7 +111,7 @@ func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections"}, versions)
 }
 
 func TestMigrateAddsSessionProjectionTablesToExistingStore(t *testing.T) {
@@ -144,7 +144,64 @@ func TestMigrateAddsSessionProjectionTablesToExistingStore(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections"}, versions)
+}
+
+func TestMigrateAddsSourceCatalogProjectionColumnsToExistingStore(t *testing.T) {
+	repository := openIsolatedMigrationStore(t)
+	ctx := context.Background()
+	require.NoError(t, seedPreSourceCatalogProjectionSchema(ctx, repository))
+
+	require.NoError(t, repository.Migrate(ctx))
+
+	for _, column := range []struct {
+		table  string
+		column string
+	}{
+		{table: "source_scenes", column: "dates"},
+		{table: "source_scenes", column: "urls"},
+		{table: "source_scenes", column: "duration"},
+		{table: "source_scenes", column: "director"},
+		{table: "source_scenes", column: "code"},
+		{table: "source_scenes", column: "studio_endpoint"},
+		{table: "source_scenes", column: "studio_stash_id"},
+		{table: "source_performers", column: "aliases"},
+		{table: "source_performers", column: "gender"},
+		{table: "source_performers", column: "country"},
+		{table: "source_performers", column: "ethnicity"},
+		{table: "source_performers", column: "eye_color"},
+		{table: "source_performers", column: "hair_color"},
+		{table: "source_performers", column: "measurements"},
+		{table: "source_performers", column: "career_years"},
+		{table: "source_performers", column: "urls"},
+		{table: "source_performers", column: "remote_images"},
+		{table: "source_scene_performers", column: "appearance_order"},
+		{table: "source_scene_tags", column: "tag_order"},
+	} {
+		var exists bool
+		require.NoError(t, repository.pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = current_schema()
+					AND table_name = $1
+					AND column_name = $2
+			)
+		`, column.table, column.column).Scan(&exists))
+		require.Truef(t, exists, "%s.%s should exist", column.table, column.column)
+	}
+
+	rows, err := repository.pool.Query(ctx, "SELECT version FROM schema_migrations ORDER BY version")
+	require.NoError(t, err)
+	defer rows.Close()
+	var versions []string
+	for rows.Next() {
+		var version string
+		require.NoError(t, rows.Scan(&version))
+		versions = append(versions, version)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections"}, versions)
 }
 
 func openIsolatedMigrationStore(t *testing.T) *Store {
@@ -362,6 +419,187 @@ func seedPreSessionProjectionSchema(ctx context.Context, repository *Store) erro
 			('002_api_key_identifier'),
 			('003_legacy_api_key_auth'),
 			('004_revoke_legacy_api_keys');
+	`)
+	return err
+}
+
+func seedPreSourceCatalogProjectionSchema(ctx context.Context, repository *Store) error {
+	_, err := repository.pool.Exec(ctx, `
+		CREATE EXTENSION IF NOT EXISTS pgcrypto;
+		CREATE TABLE accounts (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);
+		CREATE TABLE api_keys (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+			key_hash TEXT NOT NULL UNIQUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			key_id TEXT NOT NULL,
+			legacy_key BOOLEAN NOT NULL DEFAULT false,
+			revoked_at TIMESTAMPTZ
+		);
+		CREATE UNIQUE INDEX api_keys_key_id_unique ON api_keys (key_id);
+		CREATE TABLE preference_events (
+			account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+			event_id UUID NOT NULL,
+			client_id UUID NOT NULL,
+			sequence BIGINT NOT NULL,
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('scene.rating.set', 'scene.rating.remove')),
+			rating DOUBLE PRECISION,
+			occurred_at TIMESTAMPTZ NOT NULL,
+			origin TEXT NOT NULL,
+			body_hash BYTEA NOT NULL,
+			received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			PRIMARY KEY (account_id, event_id)
+		);
+		CREATE TABLE engagement_events (
+			account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+			event_id UUID NOT NULL,
+			client_id UUID NOT NULL,
+			sequence BIGINT NOT NULL,
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('scene.played', 'scene.o')),
+			occurred_at TIMESTAMPTZ NOT NULL,
+			origin TEXT NOT NULL,
+			body_hash BYTEA NOT NULL,
+			received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			PRIMARY KEY (account_id, event_id)
+		);
+		CREATE TABLE current_preferences (
+			account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			rating DOUBLE PRECISION NOT NULL,
+			client_id UUID NOT NULL,
+			sequence BIGINT NOT NULL,
+			occurred_at TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (account_id, endpoint, stash_id)
+		);
+		CREATE TABLE session_projections (
+			account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+			projection_version BIGINT NOT NULL CHECK (projection_version >= 1),
+			projection_type TEXT NOT NULL CHECK (projection_type IN ('latency', 'o_bounded')),
+			rebuilt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			PRIMARY KEY (account_id, projection_version, projection_type)
+		);
+		CREATE TABLE session_projection_items (
+			account_id UUID NOT NULL,
+			projection_version BIGINT NOT NULL,
+			projection_type TEXT NOT NULL CHECK (projection_type IN ('latency', 'o_bounded')),
+			session_order INTEGER NOT NULL CHECK (session_order >= 1),
+			item_order INTEGER NOT NULL CHECK (item_order >= 1),
+			event_id UUID NOT NULL,
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('scene.played', 'scene.o')),
+			occurred_at TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (account_id, projection_version, projection_type, session_order, item_order),
+			FOREIGN KEY (account_id, projection_version, projection_type)
+				REFERENCES session_projections (account_id, projection_version, projection_type)
+				ON DELETE CASCADE
+		);
+		CREATE TABLE source_configs (
+			endpoint TEXT PRIMARY KEY,
+			canonical_scene_url_template TEXT,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);
+		CREATE TABLE source_snapshots (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			schema_version INTEGER NOT NULL,
+			captured_at TIMESTAMPTZ NOT NULL,
+			source_updated_at TIMESTAMPTZ,
+			snapshot JSONB NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			UNIQUE (endpoint, stash_id)
+		);
+		CREATE TABLE source_scenes (
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			title TEXT,
+			details TEXT,
+			source_updated_at TIMESTAMPTZ,
+			remote_images JSONB NOT NULL DEFAULT '[]'::jsonb,
+			PRIMARY KEY (endpoint, stash_id)
+		);
+		CREATE TABLE source_performers (
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			source_updated_at TIMESTAMPTZ,
+			PRIMARY KEY (endpoint, stash_id)
+		);
+		CREATE TABLE source_studios (
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			source_updated_at TIMESTAMPTZ,
+			PRIMARY KEY (endpoint, stash_id)
+		);
+		CREATE TABLE source_tags (
+			endpoint TEXT NOT NULL,
+			stash_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			source_updated_at TIMESTAMPTZ,
+			PRIMARY KEY (endpoint, stash_id)
+		);
+		CREATE TABLE source_scene_performers (
+			scene_endpoint TEXT NOT NULL,
+			scene_stash_id TEXT NOT NULL,
+			performer_endpoint TEXT NOT NULL,
+			performer_stash_id TEXT NOT NULL,
+			PRIMARY KEY (scene_endpoint, scene_stash_id, performer_endpoint, performer_stash_id)
+		);
+		CREATE TABLE source_scene_tags (
+			scene_endpoint TEXT NOT NULL,
+			scene_stash_id TEXT NOT NULL,
+			tag_endpoint TEXT NOT NULL,
+			tag_stash_id TEXT NOT NULL,
+			PRIMARY KEY (scene_endpoint, scene_stash_id, tag_endpoint, tag_stash_id)
+		);
+		CREATE TABLE model_versions (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			activated_at TIMESTAMPTZ,
+			active BOOLEAN NOT NULL DEFAULT false
+		);
+		CREATE UNIQUE INDEX model_versions_one_active
+			ON model_versions ((active))
+			WHERE active;
+		CREATE TABLE item_neighbors (
+			model_version_id UUID NOT NULL REFERENCES model_versions(id) ON DELETE CASCADE,
+			source_endpoint TEXT NOT NULL,
+			source_stash_id TEXT NOT NULL,
+			neighbor_endpoint TEXT NOT NULL,
+			neighbor_stash_id TEXT NOT NULL,
+			score DOUBLE PRECISION NOT NULL,
+			reasons JSONB NOT NULL DEFAULT '[]'::jsonb,
+			PRIMARY KEY (model_version_id, source_endpoint, source_stash_id, neighbor_endpoint, neighbor_stash_id)
+		);
+		CREATE TABLE user_recommendations (
+			model_version_id UUID NOT NULL REFERENCES model_versions(id) ON DELETE CASCADE,
+			account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+			source_endpoint TEXT NOT NULL,
+			source_stash_id TEXT NOT NULL,
+			score DOUBLE PRECISION NOT NULL,
+			reasons JSONB NOT NULL DEFAULT '[]'::jsonb,
+			PRIMARY KEY (model_version_id, account_id, source_endpoint, source_stash_id)
+		);
+		CREATE TABLE schema_migrations (
+			version TEXT PRIMARY KEY,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);
+		INSERT INTO schema_migrations (version) VALUES
+			('001_initial'),
+			('002_api_key_identifier'),
+			('003_legacy_api_key_auth'),
+			('004_revoke_legacy_api_keys'),
+			('005_session_projections');
 	`)
 	return err
 }

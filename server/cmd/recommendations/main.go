@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/treehorn/stash-recommendations/server/internal/catalog"
 	"github.com/treehorn/stash-recommendations/server/internal/config"
 	"github.com/treehorn/stash-recommendations/server/internal/httpapi"
 	"github.com/treehorn/stash-recommendations/server/internal/ingest"
@@ -30,6 +31,7 @@ func main() {
 	handler := httpapi.NewMux(httpapi.Dependencies{
 		AccountRepository:  repository,
 		InteractionService: ingest.NewInteractionService(repository),
+		SnapshotService:    catalog.NewSnapshotService(repository),
 	})
 	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
 		log.Fatal(err)

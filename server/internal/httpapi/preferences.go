@@ -18,6 +18,7 @@ type InteractionService interface {
 type Dependencies struct {
 	AccountRepository  store.AccountRepository
 	InteractionService InteractionService
+	SnapshotService    SourceSnapshotService
 }
 
 func PostInteractions(service InteractionService) http.Handler {
