@@ -86,6 +86,31 @@ def test_queue_engagement_sync_imports_only_new_history_with_stable_identity(tmp
     ) == payloads[0]["event_id"]
 
 
+def test_queue_engagement_sync_skips_pending_deterministic_events_without_history_marker(tmp_path: Path) -> None:
+    database_path = tmp_path / "recommendations.sqlite3"
+    stash = FakeStash(
+        engagement_history=[
+            {
+                "id": "44",
+                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-44"}],
+                "play_history": [PLAYED_AT],
+                "o_history": [],
+            }
+        ]
+    )
+    state = SyncState(database_path, client_id_factory=lambda: CLIENT_ID)
+    outbox = Outbox(database_path)
+
+    assert queue_engagement_sync(stash, outbox, state, confirmed=True) == {"queued": 1, "kind": "engagement-sync"}
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("DELETE FROM synced_history_events")
+
+    result = queue_engagement_sync(stash, outbox, state, confirmed=True)
+
+    assert result == {"queued": 0, "kind": "engagement-sync"}
+    assert len(_pending_payloads(database_path, "preference_event")) == 1
+
+
 def test_build_history_event_id_varies_by_client_id() -> None:
     first = build_history_event_id(
         "550e8400-e29b-41d4-a716-446655440001",
@@ -158,6 +183,59 @@ def test_queue_metadata_sync_deduplicates_keys_and_queues_only_configured_source
     assert len(payloads) == 1
     assert payloads[0]["content_key"] == {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}
     assert payloads[0]["source_updated_at"] == "2026-08-31T00:00:00Z"
+
+
+def test_queue_metadata_sync_continues_after_per_key_mapping_failure(tmp_path: Path) -> None:
+    database_path = tmp_path / "recommendations.sqlite3"
+    stash = FakeStash(
+        rated_scenes=[
+            {
+                "id": "1",
+                "rating100": 80,
+                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}],
+            },
+            {
+                "id": "2",
+                "rating100": 40,
+                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-2"}],
+            },
+        ]
+    )
+    source = SourceClient(
+        [{"endpoint": "https://box.example/graphql", "api_key": "source-key", "max_requests_per_minute": 30}],
+        transport=lambda url, api_key, query, variables: {
+            "data": {
+                "findScene": {
+                    "id": variables["id"],
+                    "title": f"Example {variables['id']}",
+                    "release_date": "2026-08-30",
+                    "urls": [f"https://example.test/scenes/{variables['id']}"],
+                    "updated": None if variables["id"] == "scene-1" else "2026-08-31T00:00:00Z",
+                    "images": [{"url": "https://images.example/scene.jpg"}],
+                    "performers": [],
+                    "tags": [],
+                }
+            }
+        },
+    )
+    outbox = Outbox(database_path)
+
+    result = queue_metadata_sync(stash, outbox, source, confirmed=True)
+    payloads = _pending_payloads(database_path, "source_snapshot")
+
+    assert result == {
+        "queued": 1,
+        "failed": 1,
+        "kind": "metadata-sync",
+        "errors": [
+            {
+                "content_key": {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
+                "error": "source_updated_at is required",
+            }
+        ],
+    }
+    assert len(payloads) == 1
+    assert payloads[0]["content_key"] == {"endpoint": "https://box.example/graphql", "stash_id": "scene-2"}
 
 
 def test_sync_engagement_mode_requires_confirmation_before_queueing(tmp_path: Path, monkeypatch: object) -> None:

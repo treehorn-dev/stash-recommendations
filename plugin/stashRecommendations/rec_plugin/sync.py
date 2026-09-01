@@ -99,7 +99,7 @@ def queue_rating_sync(stash: Any, outbox: Outbox, state: SyncState, *, confirmed
 
 
 def queue_engagement_sync(stash: Any, outbox: Outbox, state: SyncState, *, confirmed: bool) -> dict[str, Any]:
-    candidates = list(_new_history_candidates(stash.iter_engagement_history(), state))
+    candidates = list(_new_history_candidates(stash.iter_engagement_history(), state, outbox))
     if not confirmed:
         return {"requires_confirmation": True, "count": len(candidates), "kind": "engagement-sync"}
     events = list(_materialize_history_events(candidates, state))
@@ -114,13 +114,26 @@ def queue_metadata_sync(stash: Any, outbox: Outbox, source: Any, *, confirmed: b
     if not confirmed:
         return {"requires_confirmation": True, "count": len(keys), "kind": "metadata-sync"}
     queued = 0
+    errors: list[dict[str, Any]] = []
     for key in keys:
-        scene = source.fetch_scene(key.endpoint, key.stash_id)
-        if scene is None:
-            continue
-        outbox.enqueue(to_source_snapshot(key.endpoint, _utcnow(), scene))
-        queued += 1
-    return {"queued": queued, "kind": "metadata-sync"}
+        try:
+            scene = source.fetch_scene(key.endpoint, key.stash_id)
+            if scene is None:
+                continue
+            outbox.enqueue(to_source_snapshot(key.endpoint, _utcnow(), scene))
+            queued += 1
+        except Exception as error:
+            errors.append(
+                {
+                    "content_key": {"endpoint": key.endpoint, "stash_id": key.stash_id},
+                    "error": str(error),
+                }
+            )
+    result: dict[str, Any] = {"queued": queued, "kind": "metadata-sync"}
+    if errors:
+        result["failed"] = len(errors)
+        result["errors"] = errors
+    return result
 
 
 def build_rating_events(
@@ -180,13 +193,15 @@ class HistoryCandidate:
     occurred_at: datetime
 
 
-def _new_history_candidates(history_rows: Iterable[dict[str, Any]], state: SyncState) -> Iterator[HistoryCandidate]:
+def _new_history_candidates(history_rows: Iterable[dict[str, Any]], state: SyncState, outbox: Outbox) -> Iterator[HistoryCandidate]:
     candidates: list[HistoryCandidate] = []
     seen_ids: set[str] = set()
     client_id = state.client_id
     for row in history_rows:
         for candidate in _history_candidates_for_row(row, client_id):
-            if candidate.event_id in seen_ids or state.has_history_event(candidate.event_id):
+            if candidate.event_id in seen_ids:
+                continue
+            if state.has_history_event(candidate.event_id) or outbox.has_event_id(candidate.event_id):
                 continue
             seen_ids.add(candidate.event_id)
             candidates.append(candidate)
