@@ -1,0 +1,1 @@
+{"schema_version":1,"event_id":"550e8400-e29b-41d4-a716-446655440008","client_id":"550e8400-e29b-41d4-a716-446655440001","sequence":14,"occurred_at":"2026-08-30T00:06:00Z","content_key":{"endpoint":"HTTPS://BOX.EXAMPLE/GRAPHQL/","stash_id":"scene-1"},"kind":"scene.played","origin":"history"}

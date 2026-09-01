@@ -206,6 +206,6 @@ def _parse_public_https_url(value: str):
         raise ValueError("must be an absolute HTTPS URL") from error
     if parsed.scheme.lower() != "https" or not parsed.netloc:
         raise ValueError("must be an absolute HTTPS URL")
-    if username is not None or parsed.query or parsed.fragment:
+    if "?" in value or "#" in value or username is not None or parsed.query or parsed.fragment:
         raise ValueError("must not contain credentials, query, or fragment")
     return parsed

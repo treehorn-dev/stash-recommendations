@@ -25,7 +25,7 @@
       "additionalProperties": false,
       "required": ["endpoint", "stash_id"],
       "properties": {
-        "endpoint": {"type": "string", "format": "uri", "pattern": "^https://[^/?#@]+(?:/[^?#]*)?$"},
+        "endpoint": {"type": "string", "format": "uri", "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^/?#@]+(?:/[^?#]*)?$"},
         "stash_id": {"type": "string", "pattern": ".*\\S.*"}
       }
     }
