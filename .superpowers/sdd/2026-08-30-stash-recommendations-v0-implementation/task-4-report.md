@@ -172,3 +172,131 @@ node --test tests/ui/*.test.js
 - The plan references `make test-server`, but this target does not exist in the
   current `Makefile`; the equivalent verification used here was
   `POSTGRES_TEST_DSN=... go test ./server/... -v`.
+
+## Fix Round 1
+
+Scope: fixed three reviewed Task 4 regressions only. Current-preference
+projection now consults immutable preference history before updating mutable
+state, replay identity is global per account/event ID across both interaction
+tables, and the HTTP endpoint rejects trailing JSON after the first event. No
+schema evolution was required for this round.
+
+### RED
+
+Command:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/ingest -run TestOlderRatingDoesNotRecreateProjectionAfterNewerRemove -v
+```
+
+Output:
+
+```text
+=== RUN   TestOlderRatingDoesNotRecreateProjectionAfterNewerRemove
+    preferences_test.go:82:
+        Error:       Should be false
+--- FAIL: TestOlderRatingDoesNotRecreateProjectionAfterNewerRemove (1.61s)
+FAIL
+```
+
+Command:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/ingest -run TestAcceptRejectsCrossCategoryReplayUsingSameEventID -v
+```
+
+Output:
+
+```text
+=== RUN   TestAcceptRejectsCrossCategoryReplayUsingSameEventID
+    preferences_test.go:148:
+        Error:       Expected error with "interaction event conflict" in chain but got nil.
+--- FAIL: TestAcceptRejectsCrossCategoryReplayUsingSameEventID (1.16s)
+FAIL
+```
+
+Command:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/httpapi -run TestPostInteractionsRejectsTrailingJSONAfterValidEvent -v
+```
+
+Output:
+
+```text
+=== RUN   TestPostInteractionsRejectsTrailingJSONAfterValidEvent
+    preferences_test.go:77:
+        Error:       Not equal:
+                     expected: 400
+                     actual  : 202
+--- FAIL: TestPostInteractionsRejectsTrailingJSONAfterValidEvent (0.93s)
+FAIL
+```
+
+### GREEN
+
+Focused verification:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/ingest -run TestOlderRatingDoesNotRecreateProjectionAfterNewerRemove -v
+```
+
+```text
+--- PASS: TestOlderRatingDoesNotRecreateProjectionAfterNewerRemove (0.51s)
+PASS
+ok      github.com/treehorn/stash-recommendations/server/internal/ingest   0.725s
+```
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/ingest -run TestAcceptRejectsCrossCategoryReplayUsingSameEventID -v
+```
+
+```text
+=== RUN   TestAcceptRejectsCrossCategoryReplayUsingSameEventID
+--- PASS: TestAcceptRejectsCrossCategoryReplayUsingSameEventID (0.59s)
+PASS
+ok      github.com/treehorn/stash-recommendations/server/internal/ingest   1.181s
+```
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/httpapi -run TestPostInteractionsRejectsTrailingJSONAfterValidEvent -v
+```
+
+```text
+=== RUN   TestPostInteractionsRejectsTrailingJSONAfterValidEvent
+--- PASS: TestPostInteractionsRejectsTrailingJSONAfterValidEvent (0.83s)
+PASS
+ok      github.com/treehorn/stash-recommendations/server/internal/httpapi  1.843s
+```
+
+Affected server verification:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/... -v
+```
+
+```text
+PASS: server/internal/auth
+PASS: server/internal/domain
+PASS: server/internal/httpapi
+PASS: server/internal/ingest
+PASS: server/internal/store
+```
+
+Commits:
+
+- `962bb48` `fix: preserve interaction ordering and replay identity`
+
+Verification limitations:
+
+- Local PostgreSQL integration commands again required escalated local access
+  from the Codex sandbox.
+- No migration test was added because this fix round stayed compatibility-safe
+  without schema changes.
