@@ -144,6 +144,9 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 		{name: "interaction-event.o.valid.json", valid: true},
 		{name: "interaction-event.with-rating.invalid.json", valid: false},
 		{name: "interaction-event.non-utc-timestamp.invalid.json", valid: false},
+		{name: "interaction-event.credential-endpoint.invalid.json", valid: false},
+		{name: "interaction-event.query-fragment-endpoint.invalid.json", valid: false},
+		{name: "interaction-event.http-endpoint.invalid.json", valid: false},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			data, err := os.ReadFile(v1FixturePath(t, fixture.name))
@@ -170,6 +173,10 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 		{name: "source-snapshot.invalid-date.invalid.json", valid: false},
 		{name: "source-snapshot.nested-null.invalid.json", valid: false},
 		{name: "source-snapshot.boolean-career-years.invalid.json", valid: false},
+		{name: "source-snapshot.invalid-remote-url.invalid.json", valid: false},
+		{name: "source-snapshot.credential-remote-image.invalid.json", valid: false},
+		{name: "source-snapshot.query-fragment-remote-reference.invalid.json", valid: false},
+		{name: "source-snapshot.http-remote-reference.invalid.json", valid: false},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			data, err := os.ReadFile(v1FixturePath(t, fixture.name))
