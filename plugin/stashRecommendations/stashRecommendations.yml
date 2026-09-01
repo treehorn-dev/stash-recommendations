@@ -1,0 +1,47 @@
+name: Stash Recommendations
+description: Recommendation sync plugin and local recommendation surfaces for Stash.
+version: 0.1
+url: https://github.com/treehorn-dev/stash-recommendations
+exec:
+  - python3
+  - "{pluginDir}/recommendations.py"
+interface: raw
+settings:
+  api_key:
+    displayName: API Key
+    description: API key for the recommendation service.
+  service_url:
+    displayName: Service URL
+    description: HTTPS URL for the recommendation service.
+  show_remote_results:
+    displayName: Show Remote Results
+    description: Include remote-only recommendations when available.
+    type: BOOLEAN
+tasks:
+  - name: sync-ratings
+    description: Queue a full sync of explicit ratings from local Stash.
+    defaultArgs:
+      mode: sync-ratings
+  - name: sync-engagement
+    description: Queue a full sync of recorded play and o history from local Stash.
+    defaultArgs:
+      mode: sync-engagement
+  - name: sync-metadata
+    description: Queue a metadata sync for configured Stash-box sources.
+    defaultArgs:
+      mode: sync-metadata
+  - name: deliver-outbox
+    description: Deliver pending recommendation events and snapshots.
+    defaultArgs:
+      mode: deliver-outbox
+  - name: status
+    description: Show outbox and configuration status.
+    defaultArgs:
+      mode: status
+hooks:
+  - name: capture-rating
+    description: Queue scene rating hook work for later processing.
+    triggeredBy:
+      - Scene.Update.Post
+    defaultArgs:
+      mode: capture-rating
