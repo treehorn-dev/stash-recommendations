@@ -33,6 +33,7 @@ var migrations = []migration{
 	{version: "005_session_projections", path: "migrations/005_session_projections.sql"},
 	{version: "006_source_catalog_projections", path: "migrations/006_source_catalog_projections.sql"},
 	{version: "007_recommendation_indexes", path: "migrations/007_recommendation_indexes.sql"},
+	{version: "008_source_catalog_groups", path: "migrations/008_source_catalog_groups.sql"},
 }
 
 var ErrInvalidAPIKey = errors.New("invalid API key")
@@ -660,6 +661,38 @@ func (store *Store) UpsertSnapshot(ctx context.Context, snapshot domain.SourceSn
 				return fmt.Errorf("insert source scene tag %s/%s: %w", scene.ID, tag.ID, err)
 			}
 		}
+
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM source_scene_groups
+			WHERE scene_endpoint = $1 AND scene_stash_id = $2
+		`, snapshot.ContentKey.Endpoint, scene.ID); err != nil {
+			return fmt.Errorf("clear source scene groups %s: %w", scene.ID, err)
+		}
+		for index, group := range scene.Groups {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO source_groups (endpoint, stash_id, name, source_updated_at)
+				VALUES ($1, $2, $3, $4)
+				ON CONFLICT (endpoint, stash_id) DO UPDATE
+				SET
+					name = EXCLUDED.name,
+					source_updated_at = EXCLUDED.source_updated_at
+				WHERE source_groups.source_updated_at IS NULL
+					OR source_groups.source_updated_at < EXCLUDED.source_updated_at
+			`, snapshot.ContentKey.Endpoint, group.ID, group.Name, sourceUpdatedAt); err != nil {
+				return fmt.Errorf("upsert source group %s: %w", group.ID, err)
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO source_scene_groups (
+					scene_endpoint,
+					scene_stash_id,
+					group_endpoint,
+					group_stash_id,
+					group_order
+				) VALUES ($1, $2, $3, $4, $5)
+			`, snapshot.ContentKey.Endpoint, scene.ID, snapshot.ContentKey.Endpoint, group.ID, index+1); err != nil {
+				return fmt.Errorf("insert source scene group %s/%s: %w", scene.ID, group.ID, err)
+			}
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -785,6 +818,30 @@ func (store *Store) CatalogSource(ctx context.Context, key domain.ContentKey) (c
 	}
 	if err := tagRows.Err(); err != nil {
 		return catalog.Source{}, false, fmt.Errorf("iterate source tags: %w", err)
+	}
+
+	groupRows, err := store.pool.Query(ctx, `
+		SELECT source_groups.endpoint, source_groups.stash_id, source_groups.name
+		FROM source_scene_groups
+		JOIN source_groups
+			ON source_groups.endpoint = source_scene_groups.group_endpoint
+			AND source_groups.stash_id = source_scene_groups.group_stash_id
+		WHERE source_scene_groups.scene_endpoint = $1 AND source_scene_groups.scene_stash_id = $2
+		ORDER BY source_scene_groups.group_order
+	`, key.Endpoint, key.StashID)
+	if err != nil {
+		return catalog.Source{}, false, fmt.Errorf("query source groups: %w", err)
+	}
+	defer groupRows.Close()
+	for groupRows.Next() {
+		var group catalog.EntityReference
+		if err := groupRows.Scan(&group.ContentKey.Endpoint, &group.ContentKey.StashID, &group.Name); err != nil {
+			return catalog.Source{}, false, fmt.Errorf("scan source group: %w", err)
+		}
+		source.Groups = append(source.Groups, group)
+	}
+	if err := groupRows.Err(); err != nil {
+		return catalog.Source{}, false, fmt.Errorf("iterate source groups: %w", err)
 	}
 
 	if canonicalSceneTemplate != nil {

@@ -74,6 +74,10 @@ func TestSnapshotUpsertTreatsEqualSourceVersionsAsNoOpIncludingRelations(t *test
 		Name:       "Tag",
 	}}, scene.Tags)
 	require.Equal(t, []catalog.EntityReference{{
+		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "group-1"},
+		Name:       "Series",
+	}}, scene.Groups)
+	require.Equal(t, []catalog.EntityReference{{
 		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "performer-1"},
 		Name:       "Performer",
 	}}, scene.Performers)
@@ -100,6 +104,10 @@ func TestSnapshotUpsertTreatsSubMicrosecondSourceVersionsAsEqual(t *testing.T) {
 		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "tag-1"},
 		Name:       "Tag",
 	}}, scene.Tags)
+	require.Equal(t, []catalog.EntityReference{{
+		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "group-1"},
+		Name:       "Series",
+	}}, scene.Groups)
 	require.Equal(t, []catalog.EntityReference{{
 		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "performer-1"},
 		Name:       "Performer",
@@ -137,6 +145,10 @@ func TestSnapshotUpsertProjectsRelationsAndCanonicalURL(t *testing.T) {
 		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "tag-1"},
 		Name:       "Tag",
 	}}, scene.Tags)
+	require.Equal(t, []catalog.EntityReference{{
+		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "group-1"},
+		Name:       "Series",
+	}}, scene.Groups)
 	require.Equal(t, []catalog.EntityReference{{
 		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "performer-1"},
 		Name:       "Performer",
@@ -279,6 +291,10 @@ func richSnapshotJSON(t *testing.T, capturedAt string, sourceUpdatedAt string) [
 			"tags": []map[string]any{{
 				"id":   "tag-1",
 				"name": "Tag",
+			}},
+			"groups": []map[string]any{{
+				"id":   "group-1",
+				"name": "Series",
 			}},
 			"performer_appearances": []map[string]any{{
 				"performer_id": "performer-1",

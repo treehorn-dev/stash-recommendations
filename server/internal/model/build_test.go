@@ -14,18 +14,14 @@ import (
 	"github.com/treehorn/stash-recommendations/server/internal/store"
 )
 
-func TestBuildProjectsOnlyValidatedCatalogScenes(t *testing.T) {
+func TestBuildPreservesBehavioralRecommendationsWithoutCatalogMetadata(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
 
-	accountA := seedModelAccount(t, pool)
-	accountB := seedModelAccount(t, pool)
-	seedRating(t, pool, accountA, "scene-a", 1)
-	seedRating(t, pool, accountA, "scene-b", 1)
-	seedRating(t, pool, accountB, "scene-a", 1)
-	seedRating(t, pool, accountB, "scene-b", 1)
-	seedLatestLatencySession(t, pool, accountA, []sessionSeed{{"scene-a", "scene.played"}, {"scene-c", "scene.o"}})
-	seedSharedPerformer(t, pool, "scene-a", "scene-d")
+	account := seedModelAccount(t, pool)
+	otherAccount := seedModelAccount(t, pool)
+	seedLatestLatencySession(t, pool, account, []sessionSeed{{"scene-a", "scene.played"}})
+	seedLatestLatencySession(t, pool, otherAccount, []sessionSeed{{"scene-a", "scene.played"}, {"scene-b", "scene.o"}})
 
 	versionID, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
@@ -33,8 +29,16 @@ func TestBuildProjectsOnlyValidatedCatalogScenes(t *testing.T) {
 	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, contentKey("scene-a"), 10)
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
-	require.Equal(t, []string{"scene-d"}, recommendationIDs(items))
-	require.Contains(t, reasonsFor(items, "scene-d"), "shared_performer")
+	require.Equal(t, []string{"scene-b"}, recommendationIDs(items))
+	require.Contains(t, reasonsFor(items, "scene-b"), "session_cooccurrence")
+	require.Nil(t, items[0].CanonicalURL)
+
+	forYou, activeVersion, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
+	require.NoError(t, err)
+	require.Equal(t, versionID, activeVersion)
+	require.Equal(t, []string{"scene-b"}, recommendationIDs(forYou))
+	require.Contains(t, reasonsFor(forYou, "scene-b"), "session_cooccurrence")
+	require.Nil(t, forYou[0].CanonicalURL)
 }
 
 func TestCollaborativeSimilarityIsMeanCenteredNormalizedAndShrunk(t *testing.T) {
@@ -61,14 +65,13 @@ func TestBuildProjectionIsDeterministicForInputOrder(t *testing.T) {
 		{AccountID: "b", ContentKey: contentKey("scene-a"), Value: 1}, {AccountID: "b", ContentKey: contentKey("scene-b"), Value: 1}, {AccountID: "b", ContentKey: contentKey("scene-c"), Value: 0},
 		{AccountID: "a", ContentKey: contentKey("scene-a"), Value: 1}, {AccountID: "a", ContentKey: contentKey("scene-b"), Value: 1}, {AccountID: "a", ContentKey: contentKey("scene-c"), Value: 0},
 	}
-	cataloged := []domain.ContentKey{contentKey("scene-a"), contentKey("scene-b"), contentKey("scene-c")}
-	first := NewBuilder(nil, DefaultOWeight).buildProjection(inputs, nil, nil, cataloged)
+	first := NewBuilder(nil, DefaultOWeight).buildProjection(inputs, nil, nil)
 	for index := 0; index < 20; index++ {
 		reversed := append([]Rating(nil), inputs...)
 		for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
 			reversed[left], reversed[right] = reversed[right], reversed[left]
 		}
-		actual := NewBuilder(nil, DefaultOWeight).buildProjection(reversed, nil, nil, cataloged)
+		actual := NewBuilder(nil, DefaultOWeight).buildProjection(reversed, nil, nil)
 		require.Equal(t, first, actual)
 	}
 }
@@ -113,6 +116,25 @@ func TestCatalogCandidatesIncludeValidatedSceneAttributes(t *testing.T) {
 	require.Contains(t, catalogCandidateReasons(candidates, "title-a", "title-b"), "shared_title")
 	require.Contains(t, catalogCandidateReasons(candidates, "date-a", "date-b"), "shared_date")
 	require.Contains(t, catalogCandidateReasons(candidates, "duration-a", "duration-b"), "similar_duration")
+}
+
+func TestCatalogCandidatesIncludeSharedGroups(t *testing.T) {
+	repository, pool := openModelTestStore(t)
+	ctx := context.Background()
+	seedCatalogedScenes(t, pool, "group-a", "group-b")
+	_, err := pool.Exec(ctx, `
+		INSERT INTO source_groups (endpoint, stash_id, name) VALUES ($1, 'group-1', 'Series')
+	`, modelEndpoint)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO source_scene_groups (scene_endpoint, scene_stash_id, group_endpoint, group_stash_id, group_order)
+		VALUES ($1, 'group-a', $1, 'group-1', 1), ($1, 'group-b', $1, 'group-1', 1)
+	`, modelEndpoint)
+	require.NoError(t, err)
+
+	candidates, err := NewRepository(repository.Pool()).CatalogCandidates(ctx)
+	require.NoError(t, err)
+	require.Contains(t, catalogCandidateReasons(candidates, "group-a", "group-b"), "shared_group")
 }
 
 func TestFailedBuildKeepsActiveVersion(t *testing.T) {

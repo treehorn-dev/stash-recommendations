@@ -24,6 +24,7 @@ type Source struct {
 	Code         string
 	Studio       *EntityReference
 	Tags         []EntityReference
+	Groups       []EntityReference
 	Performers   []EntityReference
 	RemoteImages []string
 	CanonicalURL *string

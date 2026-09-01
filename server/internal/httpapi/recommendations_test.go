@@ -51,11 +51,14 @@ func TestRecommendationReadsAuthenticateAndReturnVersionReasonsAndCanonicalURL(t
 
 	related := recommendationResponse(t, handler, "/v1/recommendations/related?"+query.Encode(), account.PlaintextKey)
 	require.Equal(t, version, related.ModelVersion)
-	require.Len(t, related.Items, 1)
+	require.Len(t, related.Items, 2)
 	require.Equal(t, "scene-b", related.Items[0].ContentKey.StashID)
 	require.Equal(t, version, related.Items[0].ModelVersion)
 	require.Contains(t, related.Items[0].Reasons, "collaborative_rating")
 	require.Equal(t, "https://box.example/scenes/scene-b", *related.Items[0].CanonicalURL)
+	require.Equal(t, "scene-c", related.Items[1].ContentKey.StashID)
+	require.Contains(t, related.Items[1].Reasons, "collaborative_rating")
+	require.Equal(t, "https://box.example/scenes/scene-c", *related.Items[1].CanonicalURL)
 
 	forYou := recommendationResponse(t, handler, "/v1/recommendations/for-you?limit=5", account.PlaintextKey)
 	require.Equal(t, version, forYou.ModelVersion)
@@ -88,7 +91,8 @@ func TestRecommendationReadsReturnEmptyColdStartAndOmitCanonicalURL(t *testing.T
 
 	query := url.Values{"endpoint": {apiModelEndpoint}, "stash_id": {"scene-a"}}
 	related := recommendationResponse(t, handler, "/v1/recommendations/related?"+query.Encode(), account.PlaintextKey)
-	require.Len(t, related.Items, 1)
+	require.Len(t, related.Items, 2)
+	require.Equal(t, "scene-b", related.Items[0].ContentKey.StashID)
 	require.Nil(t, related.Items[0].CanonicalURL)
 	request := httptest.NewRequest(http.MethodGet, "/v1/recommendations/related?"+query.Encode(), nil)
 	request.Header.Set("Authorization", "Bearer "+account.PlaintextKey)
@@ -99,6 +103,7 @@ func TestRecommendationReadsReturnEmptyColdStartAndOmitCanonicalURL(t *testing.T
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 	require.Equal(t, json.RawMessage("null"), body.Items[0]["canonical_url"])
+	require.Equal(t, json.RawMessage("null"), body.Items[1]["canonical_url"])
 }
 
 type recommendationAPIResponse struct {

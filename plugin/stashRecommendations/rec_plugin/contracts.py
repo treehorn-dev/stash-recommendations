@@ -10,7 +10,7 @@ from uuid import UUID
 
 
 UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-SCENE_FIELDS = {"id", "title", "details", "dates", "urls", "duration", "director", "code", "studio", "tags", "performer_appearances", "remote_images"}
+SCENE_FIELDS = {"id", "title", "details", "dates", "urls", "duration", "director", "code", "studio", "tags", "groups", "performer_appearances", "remote_images"}
 PERFORMER_FIELDS = {"id", "name", "aliases", "gender", "country", "ethnicity", "eye_color", "hair_color", "measurements", "career_years", "urls", "remote_images"}
 
 
@@ -135,6 +135,9 @@ def _validate_scene(scene: object, index: int) -> None:
     tags = _collection(scene, index, "tags")
     for tag_index, tag in enumerate(tags):
         _validate_named_record(tag, f"scenes[{index}].tags[{tag_index}]")
+    groups = _collection(scene, index, "groups")
+    for group_index, group in enumerate(groups):
+        _validate_named_record(group, f"scenes[{index}].groups[{group_index}]")
     appearances = _collection(scene, index, "performer_appearances")
     for appearance_index, appearance in enumerate(appearances):
         if not isinstance(appearance, dict) or set(appearance) != {"performer_id"} or not isinstance(appearance["performer_id"], str) or not appearance["performer_id"].strip():

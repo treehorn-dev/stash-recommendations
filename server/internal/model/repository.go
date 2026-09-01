@@ -123,6 +123,14 @@ func (repository *Repository) CatalogCandidates(ctx context.Context) ([]CatalogC
 				AND right_scene.tag_stash_id = left_scene.tag_stash_id
 				AND (right_scene.scene_endpoint, right_scene.scene_stash_id) <> (left_scene.scene_endpoint, left_scene.scene_stash_id)
 			UNION ALL
+			SELECT left_scene.scene_endpoint, left_scene.scene_stash_id,
+				right_scene.scene_endpoint, right_scene.scene_stash_id, 'shared_group'
+			FROM source_scene_groups AS left_scene
+			JOIN source_scene_groups AS right_scene
+				ON right_scene.group_endpoint = left_scene.group_endpoint
+				AND right_scene.group_stash_id = left_scene.group_stash_id
+				AND (right_scene.scene_endpoint, right_scene.scene_stash_id) <> (left_scene.scene_endpoint, left_scene.scene_stash_id)
+			UNION ALL
 			SELECT left_scene.endpoint, left_scene.stash_id, right_scene.endpoint, right_scene.stash_id, 'shared_studio'
 			FROM source_scenes AS left_scene
 			JOIN source_scenes AS right_scene

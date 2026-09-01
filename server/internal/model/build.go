@@ -34,11 +34,7 @@ func (b *Builder) BuildAndActivate(ctx context.Context) (string, error) {
 	if e != nil {
 		return "", fmt.Errorf("load catalog candidates: %w", e)
 	}
-	v, e := b.source.CatalogedScenes(ctx)
-	if e != nil {
-		return "", fmt.Errorf("load cataloged scenes: %w", e)
-	}
-	id, e := b.source.SaveAndActivate(ctx, b.buildProjection(r, s, c, v))
+	id, e := b.source.SaveAndActivate(ctx, b.buildProjection(r, s, c))
 	if e != nil {
 		return "", fmt.Errorf("save and activate recommendation projection: %w", e)
 	}
@@ -51,12 +47,11 @@ type scoredCandidate struct {
 }
 type neighborScores map[domain.ContentKey]map[domain.ContentKey]*scoredCandidate
 
-func (b *Builder) buildProjection(r []Rating, s []Session, c []CatalogCandidate, v []domain.ContentKey) Projection {
+func (b *Builder) buildProjection(r []Rating, s []Session, c []CatalogCandidate) Projection {
 	e := neighborScores{}
 	addRatings(e, r)
 	addSessions(e, s, b.oWeight)
 	addCatalogCandidates(e, c)
-	filterCatalogedEdges(e, v)
 	return Projection{flattenNeighbors(e), deriveUserRecommendations(e, r, s, b.oWeight)}
 }
 
@@ -189,23 +184,6 @@ func addEdge(e neighborScores, a, b domain.ContentKey, s float64, r string) {
 	}
 	x.score += s
 	x.reasons[r] = struct{}{}
-}
-func filterCatalogedEdges(e neighborScores, v []domain.ContentKey) {
-	ok := map[domain.ContentKey]struct{}{}
-	for _, k := range v {
-		ok[k] = struct{}{}
-	}
-	for a, cs := range e {
-		if _, yes := ok[a]; !yes {
-			delete(e, a)
-			continue
-		}
-		for b := range cs {
-			if _, yes := ok[b]; !yes {
-				delete(cs, b)
-			}
-		}
-	}
 }
 func flattenNeighbors(e neighborScores) []Neighbor {
 	var o []Neighbor

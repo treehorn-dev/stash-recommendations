@@ -50,7 +50,6 @@ type InteractionSource interface {
 // CatalogSource supplies candidates derived from validated catalog projections.
 type CatalogSource interface {
 	CatalogCandidates(context.Context) ([]CatalogCandidate, error)
-	CatalogedScenes(context.Context) ([]domain.ContentKey, error)
 }
 
 // RecommendationStore atomically persists an inactive projection and activates it only when complete.
