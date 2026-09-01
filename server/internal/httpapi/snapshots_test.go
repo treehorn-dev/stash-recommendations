@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,6 +44,35 @@ func TestPostSnapshotsRejectsMalformedAndUnauthenticatedRequests(t *testing.T) {
 	recorder = postSnapshot(handler, "", snapshotRequestJSON(t, "2026-08-30T10:00:00Z", "Example Scene"))
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 	require.Equal(t, "Bearer", recorder.Header().Get("WWW-Authenticate"))
+}
+
+func TestPostSnapshotsRejectsOversizedBodies(t *testing.T) {
+	repository := openInteractionHTTPStore(t)
+	account, err := repository.CreateAccount(context.Background())
+	require.NoError(t, err)
+
+	handler := httpapi.NewMux(httpapi.Dependencies{
+		AccountRepository: repository,
+		SnapshotService:   catalog.NewSnapshotService(repository),
+	})
+	body := bytes.Repeat([]byte("x"), 2<<20)
+
+	t.Run("declared length", func(t *testing.T) {
+		recorder := postSnapshot(handler, account.PlaintextKey, body)
+		require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+	})
+
+	t.Run("chunked", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/v1/catalog/snapshots", io.NopCloser(bytes.NewReader(body)))
+		request.ContentLength = -1
+		request.TransferEncoding = []string{"chunked"}
+		request.Header.Set("Authorization", "Bearer "+account.PlaintextKey)
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, request)
+
+		require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+	})
 }
 
 func postSnapshot(handler http.Handler, plaintextKey string, body []byte) *httptest.ResponseRecorder {

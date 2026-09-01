@@ -205,6 +205,7 @@ def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, v
     ("fixture_name", "valid"),
     [
         ("source-snapshot.valid.json", True),
+        ("source-snapshot.missing-appearance-performer.invalid.json", False),
         ("source-snapshot.missing-source-updated-at.invalid.json", False),
         ("source-snapshot.boolean-duration.invalid.json", False),
         ("source-snapshot.scalar-dates.invalid.json", False),
