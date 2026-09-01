@@ -16,6 +16,10 @@ func NewMux(deps ...Dependencies) http.Handler {
 		if deps[0].SnapshotService != nil {
 			mux.Handle("POST /v1/catalog/snapshots", RequireAccount(deps[0].AccountRepository)(PostSnapshots(deps[0].SnapshotService)))
 		}
+		if deps[0].RecommendationReader != nil {
+			mux.Handle("GET /v1/recommendations/related", RequireAccount(deps[0].AccountRepository)(GetRelated(deps[0].RecommendationReader)))
+			mux.Handle("GET /v1/recommendations/for-you", RequireAccount(deps[0].AccountRepository)(GetForYou(deps[0].RecommendationReader)))
+		}
 	}
 	return mux
 }

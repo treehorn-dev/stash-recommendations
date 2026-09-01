@@ -32,6 +32,7 @@ var migrations = []migration{
 	{version: "004_revoke_legacy_api_keys", path: "migrations/004_revoke_legacy_api_keys.sql"},
 	{version: "005_session_projections", path: "migrations/005_session_projections.sql"},
 	{version: "006_source_catalog_projections", path: "migrations/006_source_catalog_projections.sql"},
+	{version: "007_recommendation_indexes", path: "migrations/007_recommendation_indexes.sql"},
 }
 
 var ErrInvalidAPIKey = errors.New("invalid API key")

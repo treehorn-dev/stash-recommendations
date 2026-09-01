@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/treehorn/stash-recommendations/server/internal/domain"
+	"github.com/treehorn/stash-recommendations/server/internal/model"
 	"github.com/treehorn/stash-recommendations/server/internal/store"
 )
 
@@ -16,9 +17,10 @@ type InteractionService interface {
 }
 
 type Dependencies struct {
-	AccountRepository  store.AccountRepository
-	InteractionService InteractionService
-	SnapshotService    SourceSnapshotService
+	AccountRepository    store.AccountRepository
+	InteractionService   InteractionService
+	SnapshotService      SourceSnapshotService
+	RecommendationReader model.Reader
 }
 
 func PostInteractions(service InteractionService) http.Handler {
