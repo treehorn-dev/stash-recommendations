@@ -49,6 +49,14 @@ func ParseAPIKey(plaintext string) (string, string, bool) {
 	return identifier, secret, true
 }
 
+// IsLegacyAPIKey reports whether plaintext has the pre-identifier bearer shape.
+func IsLegacyAPIKey(plaintext string) bool {
+	if !strings.HasPrefix(plaintext, apiKeyPrefix) {
+		return false
+	}
+	return isCanonicalURLValue(strings.TrimPrefix(plaintext, apiKeyPrefix), apiKeySecretLength)
+}
+
 // HashAPIKey derives a self-describing Argon2id hash suitable for storage.
 func HashAPIKey(plaintext string) (string, error) {
 	if strings.TrimSpace(plaintext) == "" {

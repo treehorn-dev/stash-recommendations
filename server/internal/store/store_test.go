@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -76,13 +77,19 @@ func TestCreateAccountStoresHashUnderAPIKeyIdentifier(t *testing.T) {
 func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
 	repository := openIsolatedMigrationStore(t)
 	ctx := context.Background()
-	legacyAccountID, legacyKeyID, err := seedLegacyAPIKeySchema(ctx, repository)
+	legacyAccountID, legacyKeyID, legacyBearer, err := seedLegacyAPIKeySchema(ctx, repository)
 	require.NoError(t, err)
 
 	require.NoError(t, repository.Migrate(ctx))
 	var backfilledKeyID string
 	require.NoError(t, repository.pool.QueryRow(ctx, "SELECT key_id FROM api_keys WHERE account_id = $1", legacyAccountID).Scan(&backfilledKeyID))
 	require.Equal(t, "legacy_"+strings.ReplaceAll(legacyKeyID, "-", ""), backfilledKeyID)
+	var isLegacy bool
+	require.NoError(t, repository.pool.QueryRow(ctx, "SELECT legacy_key FROM api_keys WHERE account_id = $1", legacyAccountID).Scan(&isLegacy))
+	require.True(t, isLegacy)
+	legacyAuthenticated, err := repository.Authenticate(ctx, legacyBearer)
+	require.NoError(t, err)
+	require.Equal(t, legacyAccountID, legacyAuthenticated.ID)
 
 	account, err := repository.CreateAccount(ctx)
 	require.NoError(t, err)
@@ -100,7 +107,7 @@ func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth"}, versions)
 }
 
 func openIsolatedMigrationStore(t *testing.T) *Store {
@@ -132,7 +139,7 @@ func openIsolatedMigrationStore(t *testing.T) *Store {
 	return repository
 }
 
-func seedLegacyAPIKeySchema(ctx context.Context, repository *Store) (string, string, error) {
+func seedLegacyAPIKeySchema(ctx context.Context, repository *Store) (string, string, string, error) {
 	_, err := repository.pool.Exec(ctx, `
 		CREATE EXTENSION IF NOT EXISTS pgcrypto;
 		CREATE TABLE accounts (
@@ -147,19 +154,20 @@ func seedLegacyAPIKeySchema(ctx context.Context, repository *Store) (string, str
 		);
 	`)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	var accountID string
 	if err := repository.pool.QueryRow(ctx, "INSERT INTO accounts DEFAULT VALUES RETURNING id").Scan(&accountID); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	hash, err := auth.HashAPIKey("legacy-bearer-format")
+	legacyBearer := "srk_" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	hash, err := auth.HashAPIKey(legacyBearer)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	var keyID string
 	if err := repository.pool.QueryRow(ctx, "INSERT INTO api_keys (account_id, key_hash) VALUES ($1, $2) RETURNING id", accountID, hash).Scan(&keyID); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return accountID, keyID, nil
+	return accountID, keyID, legacyBearer, nil
 }
