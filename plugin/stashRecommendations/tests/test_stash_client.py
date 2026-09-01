@@ -40,6 +40,18 @@ def test_find_scene_uses_local_graphql_and_session_cookie() -> None:
     assert "findScene" in calls[0][2]
 
 
+def test_find_scene_returns_none_when_graphql_scene_is_missing() -> None:
+    def transport(url: str, cookie: str | None, query: str, variables: dict[str, object]) -> dict[str, object]:
+        del url, cookie, query, variables
+        return {"data": {"findScene": None}}
+
+    client = StashClient({"Scheme": "http", "Host": "127.0.0.1", "Port": 9999}, transport=transport)
+
+    scene = client.find_scene(44)
+
+    assert scene is None
+
+
 def test_iter_rated_scenes_paginates_across_all_pages() -> None:
     calls: list[dict[str, object]] = []
     pages = {

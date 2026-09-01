@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping
 from urllib import request
 
 from rec_plugin.contracts import ContentKey
@@ -24,7 +24,7 @@ class StashClient:
         self._page_size = page_size
         self._config_cache: dict[str, Any] | None = None
 
-    def find_scene(self, scene_id: int | str) -> dict[str, Any]:
+    def find_scene(self, scene_id: int | str) -> dict[str, Any] | None:
         response = self._execute(
             """
             query FindScene($id: ID!) {
@@ -40,7 +40,10 @@ class StashClient:
             """,
             {"id": str(scene_id)},
         )
-        return dict(response["findScene"])
+        scene = response["findScene"]
+        if scene is None:
+            return None
+        return dict(_require_mapping(scene))
 
     def iter_rated_scenes(self) -> Iterator[dict[str, Any]]:
         page = 1
@@ -203,3 +206,9 @@ def _normalize_endpoint(endpoint: str) -> str:
 
 def _parse_utc_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _require_mapping(value: object) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"expected GraphQL object response, got {type(value)!r}")
+    return value

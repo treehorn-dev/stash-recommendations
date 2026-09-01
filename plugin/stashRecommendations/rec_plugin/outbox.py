@@ -95,7 +95,7 @@ class Outbox:
             )
             connection.execute("DELETE FROM outbox WHERE id = ?", (row_id,))
 
-    def record_retry(self, row_id: int, now: datetime) -> None:
+    def record_retry(self, row_id: int, now: datetime, error: str | None = None) -> None:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT attempt_count FROM outbox WHERE id = ?",
@@ -108,12 +108,13 @@ class Outbox:
             connection.execute(
                 """
                 UPDATE outbox
-                SET attempt_count = ?, next_attempt_at = ?, updated_at = ?
+                SET attempt_count = ?, next_attempt_at = ?, last_error = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
                     attempt_count,
                     _isoformat(now + timedelta(seconds=delay_seconds)),
+                    error,
                     _isoformat(now),
                     row_id,
                 ),
