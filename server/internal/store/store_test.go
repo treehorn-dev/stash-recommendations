@@ -87,9 +87,11 @@ func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
 	var isLegacy bool
 	require.NoError(t, repository.pool.QueryRow(ctx, "SELECT legacy_key FROM api_keys WHERE account_id = $1", legacyAccountID).Scan(&isLegacy))
 	require.True(t, isLegacy)
-	legacyAuthenticated, err := repository.Authenticate(ctx, legacyBearer)
-	require.NoError(t, err)
-	require.Equal(t, legacyAccountID, legacyAuthenticated.ID)
+	var revokedAt time.Time
+	require.NoError(t, repository.pool.QueryRow(ctx, "SELECT revoked_at FROM api_keys WHERE account_id = $1", legacyAccountID).Scan(&revokedAt))
+	require.False(t, revokedAt.IsZero())
+	_, err = repository.Authenticate(ctx, legacyBearer)
+	require.ErrorIs(t, err, ErrInvalidAPIKey)
 
 	account, err := repository.CreateAccount(ctx)
 	require.NoError(t, err)
@@ -107,7 +109,7 @@ func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys"}, versions)
 }
 
 func openIsolatedMigrationStore(t *testing.T) *Store {

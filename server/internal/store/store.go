@@ -25,11 +25,10 @@ var migrations = []migration{
 	{version: "001_initial", path: "migrations/001_initial.sql"},
 	{version: "002_api_key_identifier", path: "migrations/002_api_key_identifier.sql"},
 	{version: "003_legacy_api_key_auth", path: "migrations/003_legacy_api_key_auth.sql"},
+	{version: "004_revoke_legacy_api_keys", path: "migrations/004_revoke_legacy_api_keys.sql"},
 }
 
 var ErrInvalidAPIKey = errors.New("invalid API key")
-
-const legacyKeyCandidateLimit = 64
 
 type Account struct {
 	ID        string
@@ -153,10 +152,7 @@ func (store *Store) CreateAccount(ctx context.Context) (IssuedAccount, error) {
 func (store *Store) Authenticate(ctx context.Context, plaintextKey string) (Account, error) {
 	keyID, secret, ok := auth.ParseAPIKey(plaintextKey)
 	if !ok {
-		if !auth.IsLegacyAPIKey(plaintextKey) {
-			return Account{}, ErrInvalidAPIKey
-		}
-		return store.authenticateLegacyAPIKey(ctx, plaintextKey)
+		return Account{}, ErrInvalidAPIKey
 	}
 
 	var account Account
@@ -165,7 +161,7 @@ func (store *Store) Authenticate(ctx context.Context, plaintextKey string) (Acco
 		SELECT accounts.id, accounts.created_at, api_keys.key_hash
 		FROM api_keys
 		JOIN accounts ON accounts.id = api_keys.account_id
-		WHERE api_keys.key_id = $1
+		WHERE api_keys.key_id = $1 AND api_keys.revoked_at IS NULL
 	`, keyID).Scan(&account.ID, &account.CreatedAt, &hash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -177,35 +173,4 @@ func (store *Store) Authenticate(ctx context.Context, plaintextKey string) (Acco
 		return Account{}, ErrInvalidAPIKey
 	}
 	return account, nil
-}
-
-// authenticateLegacyAPIKey bounds compatibility work to pre-identifier rows.
-func (store *Store) authenticateLegacyAPIKey(ctx context.Context, plaintextKey string) (Account, error) {
-	rows, err := store.pool.Query(ctx, `
-		SELECT accounts.id, accounts.created_at, api_keys.key_hash
-		FROM api_keys
-		JOIN accounts ON accounts.id = api_keys.account_id
-		WHERE api_keys.legacy_key
-		ORDER BY api_keys.id
-		LIMIT $1
-	`, legacyKeyCandidateLimit)
-	if err != nil {
-		return Account{}, fmt.Errorf("query legacy API keys: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var account Account
-		var hash string
-		if err := rows.Scan(&account.ID, &account.CreatedAt, &hash); err != nil {
-			return Account{}, fmt.Errorf("scan legacy API key: %w", err)
-		}
-		if auth.VerifyAPIKey(hash, plaintextKey) {
-			return account, nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return Account{}, fmt.Errorf("iterate legacy API keys: %w", err)
-	}
-	return Account{}, ErrInvalidAPIKey
 }
