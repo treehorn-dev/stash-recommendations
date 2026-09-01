@@ -138,7 +138,7 @@ git diff --check
 ## Commits
 
 - `a5fc8a9` `feat: build engagement session projections`
-- Pending evidence commit
+- `8f7131f` `docs: record task 5 session evidence`
 
 ## Verification Limitations
 
@@ -147,3 +147,102 @@ git diff --check
 - The plan still refers to `make test-server`, but this repository currently
   exposes `go test ./server/...` instead; that direct command was used for the
   required fresh verification.
+
+## Fix Round 1
+
+Scope: fixed the same-account concurrent rebuild race only. `session.Builder`
+now serializes rebuilds per account inside the rebuild transaction before it
+allocates the next projection version. The equal-timestamp event-ID ordering
+coverage note remains deferred and was not expanded into this fix round.
+
+### RED
+
+Command:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/session -run TestRebuildConcurrentCallsAllocateDistinctProjectionVersions -v
+```
+
+Output:
+
+```text
+# github.com/treehorn/stash-recommendations/server/internal/session [github.com/treehorn/stash-recommendations/server/internal/session.test]
+server/internal/session/build_test.go:209:10: builder.afterVersionAllocated undefined (type *Builder has no field or method afterVersionAllocated)
+FAIL    github.com/treehorn/stash-recommendations/server/internal/session [build failed]
+FAIL
+```
+
+### GREEN
+
+Focused regression verification:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/session -run TestRebuildConcurrentCallsAllocateDistinctProjectionVersions -v
+```
+
+```text
+=== RUN   TestRebuildConcurrentCallsAllocateDistinctProjectionVersions
+--- PASS: TestRebuildConcurrentCallsAllocateDistinctProjectionVersions (2.57s)
+PASS
+ok      github.com/treehorn/stash-recommendations/server/internal/session  3.057s
+```
+
+Affected package verification:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/session -v
+```
+
+```text
+=== RUN   TestRebuildKeepsTwoHourGapInSingleLatencySession
+--- PASS: TestRebuildKeepsTwoHourGapInSingleLatencySession (0.55s)
+=== RUN   TestRebuildStartsNewLatencySessionWhenGapExceedsTwoHours
+--- PASS: TestRebuildStartsNewLatencySessionWhenGapExceedsTwoHours (0.58s)
+=== RUN   TestRebuildClosesOBoundedSessionsAndTreatsOrphanOAsClosedSession
+--- PASS: TestRebuildClosesOBoundedSessionsAndTreatsOrphanOAsClosedSession (0.51s)
+=== RUN   TestRebuildCollapsesOnlyConsecutiveRepeats
+--- PASS: TestRebuildCollapsesOnlyConsecutiveRepeats (0.44s)
+=== RUN   TestRebuildConcurrentCallsAllocateDistinctProjectionVersions
+--- PASS: TestRebuildConcurrentCallsAllocateDistinctProjectionVersions (1.60s)
+PASS
+ok      github.com/treehorn/stash-recommendations/server/internal/session  3.908s
+```
+
+Fresh server verification:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/... -v
+```
+
+```text
+PASS: server/internal/auth
+PASS: server/internal/domain
+PASS: server/internal/httpapi
+PASS: server/internal/ingest
+PASS: server/internal/session
+PASS: server/internal/store
+```
+
+Repository verification:
+
+```bash
+git diff --check
+```
+
+```text
+[clean]
+```
+
+### Commits
+
+- `7f0fbcd` `fix: serialize concurrent session rebuilds`
+- Pending evidence commit
+
+### Verification Limitations
+
+- PostgreSQL integration commands again required escalated local access because
+  the default sandbox could not reach `localhost:5432`.
