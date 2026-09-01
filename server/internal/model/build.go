@@ -3,11 +3,12 @@ package model
 import (
 	"context"
 	"fmt"
+	"github.com/treehorn/stash-recommendations/server/internal/domain"
 	"math"
 	"sort"
-
-	"github.com/treehorn/stash-recommendations/server/internal/domain"
 )
+
+const collaborativeShrinkage = 2
 
 type Builder struct {
 	source  buildSource
@@ -15,213 +16,288 @@ type Builder struct {
 }
 
 func NewBuilder(source buildSource, oWeight float64) *Builder {
-	if oWeight <= 0 {
+	if oWeight <= 0 || math.IsNaN(oWeight) || math.IsInf(oWeight, 0) {
 		oWeight = DefaultOWeight
 	}
-	return &Builder{source: source, oWeight: oWeight}
+	return &Builder{source, oWeight}
 }
-
-// BuildAndActivate calculates a new projection outside request paths and atomically serves it.
-func (builder *Builder) BuildAndActivate(ctx context.Context) (string, error) {
-	ratings, err := builder.source.CurrentRatings(ctx)
-	if err != nil {
-		return "", fmt.Errorf("load ratings: %w", err)
+func (b *Builder) BuildAndActivate(ctx context.Context) (string, error) {
+	r, e := b.source.CurrentRatings(ctx)
+	if e != nil {
+		return "", fmt.Errorf("load ratings: %w", e)
 	}
-	sessions, err := builder.source.CurrentSessions(ctx)
-	if err != nil {
-		return "", fmt.Errorf("load sessions: %w", err)
+	s, e := b.source.CurrentSessions(ctx)
+	if e != nil {
+		return "", fmt.Errorf("load sessions: %w", e)
 	}
-	catalogCandidates, err := builder.source.CatalogCandidates(ctx)
-	if err != nil {
-		return "", fmt.Errorf("load catalog candidates: %w", err)
+	c, e := b.source.CatalogCandidates(ctx)
+	if e != nil {
+		return "", fmt.Errorf("load catalog candidates: %w", e)
 	}
-
-	projection := builder.buildProjection(ratings, sessions, catalogCandidates)
-	version, err := builder.source.SaveAndActivate(ctx, projection)
-	if err != nil {
-		return "", fmt.Errorf("save and activate recommendation projection: %w", err)
+	v, e := b.source.CatalogedScenes(ctx)
+	if e != nil {
+		return "", fmt.Errorf("load cataloged scenes: %w", e)
 	}
-	return version, nil
+	id, e := b.source.SaveAndActivate(ctx, b.buildProjection(r, s, c, v))
+	if e != nil {
+		return "", fmt.Errorf("save and activate recommendation projection: %w", e)
+	}
+	return id, nil
 }
 
 type scoredCandidate struct {
 	score   float64
 	reasons map[string]struct{}
 }
-
 type neighborScores map[domain.ContentKey]map[domain.ContentKey]*scoredCandidate
 
-func (builder *Builder) buildProjection(ratings []Rating, sessions []Session, catalogCandidates []CatalogCandidate) Projection {
-	edges := make(neighborScores)
-	addRatings(edges, ratings)
-	addSessions(edges, sessions, builder.oWeight)
-	addCatalogCandidates(edges, catalogCandidates)
-	return Projection{
-		Neighbors:           flattenNeighbors(edges),
-		UserRecommendations: deriveUserRecommendations(edges, ratings, sessions, builder.oWeight),
-	}
+func (b *Builder) buildProjection(r []Rating, s []Session, c []CatalogCandidate, v []domain.ContentKey) Projection {
+	e := neighborScores{}
+	addRatings(e, r)
+	addSessions(e, s, b.oWeight)
+	addCatalogCandidates(e, c)
+	filterCatalogedEdges(e, v)
+	return Projection{flattenNeighbors(e), deriveUserRecommendations(e, r, s, b.oWeight)}
 }
 
-func addRatings(edges neighborScores, ratings []Rating) {
-	byAccount := make(map[string][]Rating)
-	for _, rating := range ratings {
-		byAccount[rating.AccountID] = append(byAccount[rating.AccountID], rating)
+type coRatingStats struct {
+	numerator, leftSquares, rightSquares float64
+	count                                int
+}
+
+func collaborativeNeighborScores(ratings []Rating) map[domain.ContentKey]map[domain.ContentKey]float64 {
+	by := map[string][]Rating{}
+	for _, r := range ratings {
+		by[r.AccountID] = append(by[r.AccountID], r)
 	}
-	for _, accountRatings := range byAccount {
-		if len(accountRatings) < 2 {
+	accounts := make([]string, 0, len(by))
+	for a := range by {
+		accounts = append(accounts, a)
+	}
+	sort.Strings(accounts)
+	pairs := map[[2]domain.ContentKey]*coRatingStats{}
+	for _, a := range accounts {
+		rs := append([]Rating(nil), by[a]...)
+		sort.Slice(rs, func(i, j int) bool { return contentKeyLess(rs[i].ContentKey, rs[j].ContentKey) })
+		if len(rs) < 2 {
 			continue
 		}
-		mean := 0.0
-		for _, rating := range accountRatings {
-			mean += rating.Value
+		mean := 0.
+		for _, r := range rs {
+			mean += r.Value
 		}
-		mean /= float64(len(accountRatings))
-		for left := 0; left < len(accountRatings); left++ {
-			for right := left + 1; right < len(accountRatings); right++ {
-				// Mean-centering captures agreement beyond an account's own baseline;
-				// the bounded positive preference term retains a useful signal for
-				// all-positive sparse rating histories.
-				score := (accountRatings[left].Value-mean)*(accountRatings[right].Value-mean) + 0.1*accountRatings[left].Value*accountRatings[right].Value
-				addSymmetric(edges, accountRatings[left].ContentKey, accountRatings[right].ContentKey, score, "collaborative_rating")
+		mean /= float64(len(rs))
+		for i := range rs {
+			for j := i + 1; j < len(rs); j++ {
+				k := [2]domain.ContentKey{rs[i].ContentKey, rs[j].ContentKey}
+				z := pairs[k]
+				if z == nil {
+					z = &coRatingStats{}
+					pairs[k] = z
+				}
+				x, y := rs[i].Value-mean, rs[j].Value-mean
+				z.numerator += x * y
+				z.leftSquares += x * x
+				z.rightSquares += y * y
+				z.count++
 			}
 		}
 	}
-}
-
-func addSessions(edges neighborScores, sessions []Session, oWeight float64) {
-	for _, session := range sessions {
-		for left := 0; left < len(session.Items); left++ {
-			for right := left + 1; right < len(session.Items); right++ {
-				weight := (eventWeight(session.Items[left].Kind, oWeight) + eventWeight(session.Items[right].Kind, oWeight)) / 2
-				addSymmetric(edges, session.Items[left].ContentKey, session.Items[right].ContentKey, weight, "session_cooccurrence")
-			}
+	ks := make([][2]domain.ContentKey, 0, len(pairs))
+	for k := range pairs {
+		ks = append(ks, k)
+	}
+	sort.Slice(ks, func(i, j int) bool {
+		if ks[i][0] != ks[j][0] {
+			return contentKeyLess(ks[i][0], ks[j][0])
 		}
-		for index := 0; index+1 < len(session.Items); index++ {
-			weight := (eventWeight(session.Items[index].Kind, oWeight) + eventWeight(session.Items[index+1].Kind, oWeight)) / 2
-			addEdge(edges, session.Items[index].ContentKey, session.Items[index+1].ContentKey, weight, "ordered_transition")
+		return contentKeyLess(ks[i][1], ks[j][1])
+	})
+	out := map[domain.ContentKey]map[domain.ContentKey]float64{}
+	for _, k := range ks {
+		z := pairs[k]
+		d := math.Sqrt(z.leftSquares * z.rightSquares)
+		if d == 0 {
+			continue
+		}
+		score := z.numerator / d * float64(z.count) / float64(z.count+collaborativeShrinkage)
+		if out[k[0]] == nil {
+			out[k[0]] = map[domain.ContentKey]float64{}
+		}
+		if out[k[1]] == nil {
+			out[k[1]] = map[domain.ContentKey]float64{}
+		}
+		out[k[0]][k[1]] = score
+		out[k[1]][k[0]] = score
+	}
+	return out
+}
+func addRatings(e neighborScores, r []Rating) {
+	for a, cs := range collaborativeNeighborScores(r) {
+		for c, s := range cs {
+			addEdge(e, a, c, s, "collaborative_rating")
 		}
 	}
 }
-
-func eventWeight(kind string, oWeight float64) float64 {
-	if kind == "scene.o" {
-		return oWeight
+func addSessions(e neighborScores, s []Session, w float64) {
+	for _, x := range s {
+		for i := 0; i < len(x.Items); i++ {
+			for j := i + 1; j < len(x.Items); j++ {
+				addSymmetric(e, x.Items[i].ContentKey, x.Items[j].ContentKey, (eventWeight(x.Items[i].Kind, w)+eventWeight(x.Items[j].Kind, w))/2, "session_cooccurrence")
+			}
+		}
+		for i := 0; i+1 < len(x.Items); i++ {
+			addEdge(e, x.Items[i].ContentKey, x.Items[i+1].ContentKey, (eventWeight(x.Items[i].Kind, w)+eventWeight(x.Items[i+1].Kind, w))/2, "ordered_transition")
+		}
+	}
+}
+func eventWeight(k string, w float64) float64 {
+	if k == "scene.o" {
+		return w
 	}
 	return 1
 }
-
-func addCatalogCandidates(edges neighborScores, candidates []CatalogCandidate) {
-	for _, candidate := range candidates {
-		addEdge(edges, candidate.Source, candidate.Candidate, 0.5, candidate.Reason)
+func addCatalogCandidates(e neighborScores, c []CatalogCandidate) {
+	sort.Slice(c, func(i, j int) bool {
+		if c[i].Source != c[j].Source {
+			return contentKeyLess(c[i].Source, c[j].Source)
+		}
+		if c[i].Candidate != c[j].Candidate {
+			return contentKeyLess(c[i].Candidate, c[j].Candidate)
+		}
+		return c[i].Reason < c[j].Reason
+	})
+	for _, x := range c {
+		addEdge(e, x.Source, x.Candidate, .5, x.Reason)
 	}
 }
-
-func addSymmetric(edges neighborScores, left, right domain.ContentKey, score float64, reason string) {
-	addEdge(edges, left, right, score, reason)
-	addEdge(edges, right, left, score, reason)
+func addSymmetric(e neighborScores, a, b domain.ContentKey, s float64, r string) {
+	addEdge(e, a, b, s, r)
+	addEdge(e, b, a, s, r)
 }
-
-func addEdge(edges neighborScores, source, candidate domain.ContentKey, score float64, reason string) {
-	if source == candidate {
+func addEdge(e neighborScores, a, b domain.ContentKey, s float64, r string) {
+	if a == b {
 		return
 	}
-	if edges[source] == nil {
-		edges[source] = make(map[domain.ContentKey]*scoredCandidate)
+	if e[a] == nil {
+		e[a] = map[domain.ContentKey]*scoredCandidate{}
 	}
-	entry := edges[source][candidate]
-	if entry == nil {
-		entry = &scoredCandidate{reasons: make(map[string]struct{})}
-		edges[source][candidate] = entry
+	x := e[a][b]
+	if x == nil {
+		x = &scoredCandidate{reasons: map[string]struct{}{}}
+		e[a][b] = x
 	}
-	entry.score += score
-	entry.reasons[reason] = struct{}{}
+	x.score += s
+	x.reasons[r] = struct{}{}
 }
-
-func flattenNeighbors(edges neighborScores) []Neighbor {
-	var neighbors []Neighbor
-	for source, candidates := range edges {
-		for candidate, scored := range candidates {
-			neighbors = append(neighbors, Neighbor{Source: source, Candidate: candidate, Score: scored.score, Reasons: sortedReasons(scored.reasons)})
+func filterCatalogedEdges(e neighborScores, v []domain.ContentKey) {
+	ok := map[domain.ContentKey]struct{}{}
+	for _, k := range v {
+		ok[k] = struct{}{}
+	}
+	for a, cs := range e {
+		if _, yes := ok[a]; !yes {
+			delete(e, a)
+			continue
+		}
+		for b := range cs {
+			if _, yes := ok[b]; !yes {
+				delete(cs, b)
+			}
 		}
 	}
-	sort.Slice(neighbors, func(i, j int) bool {
-		if neighbors[i].Source != neighbors[j].Source {
-			return contentKeyLess(neighbors[i].Source, neighbors[j].Source)
+}
+func flattenNeighbors(e neighborScores) []Neighbor {
+	var o []Neighbor
+	for _, a := range sortedContentKeys(e) {
+		for _, b := range sortedContentKeys(e[a]) {
+			x := e[a][b]
+			o = append(o, Neighbor{a, b, x.score, sortedReasons(x.reasons)})
 		}
-		return contentKeyLess(neighbors[i].Candidate, neighbors[j].Candidate)
+	}
+	return o
+}
+func deriveUserRecommendations(e neighborScores, r []Rating, s []Session, w float64) []UserRecommendation {
+	known := map[string]map[domain.ContentKey]struct{}{}
+	seeds := map[string]map[domain.ContentKey]float64{}
+	knownAdd := func(a string, k domain.ContentKey) {
+		if known[a] == nil {
+			known[a] = map[domain.ContentKey]struct{}{}
+			seeds[a] = map[domain.ContentKey]float64{}
+		}
+		known[a][k] = struct{}{}
+	}
+	seedAdd := func(a string, k domain.ContentKey, z float64) { knownAdd(a, k); seeds[a][k] += z }
+	sort.Slice(r, func(i, j int) bool {
+		if r[i].AccountID != r[j].AccountID {
+			return r[i].AccountID < r[j].AccountID
+		}
+		return contentKeyLess(r[i].ContentKey, r[j].ContentKey)
 	})
-	return neighbors
-}
-
-func deriveUserRecommendations(edges neighborScores, ratings []Rating, sessions []Session, oWeight float64) []UserRecommendation {
-	known := make(map[string]map[domain.ContentKey]struct{})
-	seeds := make(map[string]map[domain.ContentKey]float64)
-	addSeed := func(accountID string, key domain.ContentKey, weight float64) {
-		if known[accountID] == nil {
-			known[accountID] = make(map[domain.ContentKey]struct{})
-			seeds[accountID] = make(map[domain.ContentKey]float64)
-		}
-		known[accountID][key] = struct{}{}
-		seeds[accountID][key] += weight
-	}
-	for _, rating := range ratings {
-		if rating.Value > 0 {
-			addSeed(rating.AccountID, rating.ContentKey, rating.Value)
+	for _, x := range r {
+		knownAdd(x.AccountID, x.ContentKey)
+		if x.Value > 0 {
+			seedAdd(x.AccountID, x.ContentKey, x.Value)
 		}
 	}
-	for _, session := range sessions {
-		for _, item := range session.Items {
-			addSeed(session.AccountID, item.ContentKey, eventWeight(item.Kind, oWeight))
+	for _, x := range s {
+		for _, i := range x.Items {
+			seedAdd(x.AccountID, i.ContentKey, eventWeight(i.Kind, w))
 		}
 	}
-
-	var results []UserRecommendation
-	for accountID, accountSeeds := range seeds {
-		candidates := make(map[domain.ContentKey]*scoredCandidate)
-		for seed, weight := range accountSeeds {
-			for candidate, neighbor := range edges[seed] {
-				if _, seen := known[accountID][candidate]; seen {
+	accounts := make([]string, 0, len(seeds))
+	for a := range seeds {
+		accounts = append(accounts, a)
+	}
+	sort.Strings(accounts)
+	var out []UserRecommendation
+	for _, a := range accounts {
+		cs := map[domain.ContentKey]*scoredCandidate{}
+		for _, seed := range sortedContentKeys(seeds[a]) {
+			for _, candidate := range sortedContentKeys(e[seed]) {
+				if _, yes := known[a][candidate]; yes {
 					continue
 				}
-				entry := candidates[candidate]
-				if entry == nil {
-					entry = &scoredCandidate{reasons: make(map[string]struct{})}
-					candidates[candidate] = entry
+				n := e[seed][candidate]
+				x := cs[candidate]
+				if x == nil {
+					x = &scoredCandidate{reasons: map[string]struct{}{}}
+					cs[candidate] = x
 				}
-				entry.score += weight * neighbor.score
-				for reason := range neighbor.reasons {
-					entry.reasons[reason] = struct{}{}
+				x.score += seeds[a][seed] * n.score
+				for reason := range n.reasons {
+					x.reasons[reason] = struct{}{}
 				}
 			}
 		}
-		for key, scored := range candidates {
-			if math.Abs(scored.score) < 1e-12 {
-				continue
+		for _, k := range sortedContentKeys(cs) {
+			x := cs[k]
+			if math.Abs(x.score) >= 1e-12 {
+				out = append(out, UserRecommendation{a, k, x.score, sortedReasons(x.reasons)})
 			}
-			results = append(results, UserRecommendation{AccountID: accountID, ContentKey: key, Score: scored.score, Reasons: sortedReasons(scored.reasons)})
 		}
 	}
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].AccountID != results[j].AccountID {
-			return results[i].AccountID < results[j].AccountID
-		}
-		return contentKeyLess(results[i].ContentKey, results[j].ContentKey)
-	})
-	return results
+	return out
 }
-
-func sortedReasons(reasons map[string]struct{}) []string {
-	values := make([]string, 0, len(reasons))
-	for reason := range reasons {
-		values = append(values, reason)
+func sortedReasons(m map[string]struct{}) []string {
+	o := make([]string, 0, len(m))
+	for x := range m {
+		o = append(o, x)
 	}
-	sort.Strings(values)
-	return values
+	sort.Strings(o)
+	return o
 }
-
-func contentKeyLess(left, right domain.ContentKey) bool {
-	if left.Endpoint != right.Endpoint {
-		return left.Endpoint < right.Endpoint
+func sortedContentKeys[T any](m map[domain.ContentKey]T) []domain.ContentKey {
+	o := make([]domain.ContentKey, 0, len(m))
+	for x := range m {
+		o = append(o, x)
 	}
-	return left.StashID < right.StashID
+	sort.Slice(o, func(i, j int) bool { return contentKeyLess(o[i], o[j]) })
+	return o
+}
+func contentKeyLess(a, b domain.ContentKey) bool {
+	if a.Endpoint != b.Endpoint {
+		return a.Endpoint < b.Endpoint
+	}
+	return a.StashID < b.StashID
 }

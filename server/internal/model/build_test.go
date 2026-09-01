@@ -14,7 +14,7 @@ import (
 	"github.com/treehorn/stash-recommendations/server/internal/store"
 )
 
-func TestBuildCombinesRatingSessionAndCatalogCandidates(t *testing.T) {
+func TestBuildProjectsOnlyValidatedCatalogScenes(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
 
@@ -33,18 +33,96 @@ func TestBuildCombinesRatingSessionAndCatalogCandidates(t *testing.T) {
 	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, contentKey("scene-a"), 10)
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
-	require.ElementsMatch(t, []string{"scene-b", "scene-c", "scene-d"}, recommendationIDs(items))
-	require.Contains(t, reasonsFor(items, "scene-b"), "collaborative_rating")
-	require.Contains(t, reasonsFor(items, "scene-c"), "session_cooccurrence")
+	require.Equal(t, []string{"scene-d"}, recommendationIDs(items))
 	require.Contains(t, reasonsFor(items, "scene-d"), "shared_performer")
+}
+
+func TestCollaborativeSimilarityIsMeanCenteredNormalizedAndShrunk(t *testing.T) {
+	ratings := []Rating{
+		{AccountID: "account-1", ContentKey: contentKey("scene-a"), Value: 1},
+		{AccountID: "account-1", ContentKey: contentKey("scene-b"), Value: 1},
+		{AccountID: "account-1", ContentKey: contentKey("scene-c"), Value: 0},
+		{AccountID: "account-2", ContentKey: contentKey("scene-a"), Value: 1},
+		{AccountID: "account-2", ContentKey: contentKey("scene-b"), Value: 1},
+		{AccountID: "account-2", ContentKey: contentKey("scene-c"), Value: 0},
+		{AccountID: "account-3", ContentKey: contentKey("scene-a"), Value: 1},
+		{AccountID: "account-3", ContentKey: contentKey("scene-d"), Value: 1},
+		{AccountID: "account-3", ContentKey: contentKey("scene-c"), Value: 0},
+	}
+
+	scores := collaborativeNeighborScores(ratings)
+	require.InDelta(t, 0.5, scores[contentKey("scene-a")][contentKey("scene-b")], 1e-12)
+	require.InDelta(t, 1.0/3.0, scores[contentKey("scene-a")][contentKey("scene-d")], 1e-12)
+	require.Greater(t, scores[contentKey("scene-a")][contentKey("scene-b")], scores[contentKey("scene-a")][contentKey("scene-d")])
+}
+
+func TestBuildProjectionIsDeterministicForInputOrder(t *testing.T) {
+	inputs := []Rating{
+		{AccountID: "b", ContentKey: contentKey("scene-a"), Value: 1}, {AccountID: "b", ContentKey: contentKey("scene-b"), Value: 1}, {AccountID: "b", ContentKey: contentKey("scene-c"), Value: 0},
+		{AccountID: "a", ContentKey: contentKey("scene-a"), Value: 1}, {AccountID: "a", ContentKey: contentKey("scene-b"), Value: 1}, {AccountID: "a", ContentKey: contentKey("scene-c"), Value: 0},
+	}
+	cataloged := []domain.ContentKey{contentKey("scene-a"), contentKey("scene-b"), contentKey("scene-c")}
+	first := NewBuilder(nil, DefaultOWeight).buildProjection(inputs, nil, nil, cataloged)
+	for index := 0; index < 20; index++ {
+		reversed := append([]Rating(nil), inputs...)
+		for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+			reversed[left], reversed[right] = reversed[right], reversed[left]
+		}
+		actual := NewBuilder(nil, DefaultOWeight).buildProjection(reversed, nil, nil, cataloged)
+		require.Equal(t, first, actual)
+	}
+}
+
+func TestForYouTreatsZeroRatingAsKnownContent(t *testing.T) {
+	repository, pool := openModelTestStore(t)
+	ctx := context.Background()
+	account := seedModelAccount(t, pool)
+	other := seedModelAccount(t, pool)
+	seedCatalogedScenes(t, pool, "scene-a", "scene-b")
+	seedRating(t, pool, account, "scene-a", 1)
+	seedRating(t, pool, account, "scene-b", 0)
+	seedRating(t, pool, other, "scene-a", 1)
+	seedRating(t, pool, other, "scene-b", 1)
+
+	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
+	require.NoError(t, err)
+	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
+	require.NoError(t, err)
+	require.Empty(t, items)
+}
+
+func TestCatalogCandidatesIncludeValidatedSceneAttributes(t *testing.T) {
+	repository, pool := openModelTestStore(t)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO source_scenes (endpoint, stash_id, title, code, dates, duration) VALUES
+			($1, 'code-a', 'Alpha', 'same-code', '["2026-01-01"]', 120),
+			($1, 'code-b', 'Beta', 'same-code', '["2026-01-02"]', 500),
+			($1, 'title-a', 'Same title', 'other-a', '["2026-02-01"]', 500),
+			($1, 'title-b', 'Same title', 'other-b', '["2026-03-01"]', 900),
+			($1, 'date-a', 'Date A', 'other-c', '["2026-04-01"]', 1000),
+			($1, 'date-b', 'Date B', 'other-d', '["2026-04-01"]', 1500),
+			($1, 'duration-a', 'Duration A', 'other-e', '["2026-05-01"]', 1000),
+			($1, 'duration-b', 'Duration B', 'other-f', '["2026-06-01"]', 1050)
+	`, modelEndpoint)
+	require.NoError(t, err)
+
+	candidates, err := NewRepository(repository.Pool()).CatalogCandidates(ctx)
+	require.NoError(t, err)
+	require.Contains(t, catalogCandidateReasons(candidates, "code-a", "code-b"), "shared_code")
+	require.Contains(t, catalogCandidateReasons(candidates, "title-a", "title-b"), "shared_title")
+	require.Contains(t, catalogCandidateReasons(candidates, "date-a", "date-b"), "shared_date")
+	require.Contains(t, catalogCandidateReasons(candidates, "duration-a", "duration-b"), "similar_duration")
 }
 
 func TestFailedBuildKeepsActiveVersion(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
 	accountID := seedModelAccount(t, pool)
+	seedCatalogedScenes(t, pool, "scene-a", "scene-b", "scene-c")
 	seedRating(t, pool, accountID, "scene-a", 1)
 	seedRating(t, pool, accountID, "scene-b", 1)
+	seedRating(t, pool, accountID, "scene-c", 0)
 
 	builder := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight)
 	activeVersion, err := builder.BuildAndActivate(ctx)
@@ -166,6 +244,24 @@ func seedSharedPerformer(t *testing.T, pool *pgxpool.Pool, firstID, secondID str
 		INSERT INTO source_performers (endpoint, stash_id, name) VALUES ($1, 'performer-1', 'Performer')
 	`, modelEndpoint)
 	require.NoError(t, err)
+}
+
+func seedCatalogedScenes(t *testing.T, pool *pgxpool.Pool, stashIDs ...string) {
+	t.Helper()
+	for _, stashID := range stashIDs {
+		_, err := pool.Exec(context.Background(), `INSERT INTO source_scenes (endpoint, stash_id) VALUES ($1, $2)`, modelEndpoint, stashID)
+		require.NoError(t, err)
+	}
+}
+
+func catalogCandidateReasons(candidates []CatalogCandidate, sourceID, candidateID string) []string {
+	var reasons []string
+	for _, candidate := range candidates {
+		if candidate.Source.StashID == sourceID && candidate.Candidate.StashID == candidateID {
+			reasons = append(reasons, candidate.Reason)
+		}
+	}
+	return reasons
 }
 
 func contentKey(stashID string) domain.ContentKey {

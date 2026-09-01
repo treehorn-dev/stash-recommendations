@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 )
@@ -19,7 +20,7 @@ func Load() (Config, error) {
 	oWeight := 1.5
 	if raw := os.Getenv("MODEL_O_WEIGHT"); raw != "" {
 		parsed, err := strconv.ParseFloat(raw, 64)
-		if err != nil || parsed <= 0 {
+		if err != nil || parsed <= 0 || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
 			return Config{}, fmt.Errorf("MODEL_O_WEIGHT must be a positive number")
 		}
 		oWeight = parsed
