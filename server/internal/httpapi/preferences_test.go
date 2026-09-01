@@ -58,6 +58,25 @@ func TestPostInteractionsRejectsMalformedAndUnauthenticatedRequests(t *testing.T
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
+func TestPostInteractionsRejectsTrailingJSONAfterValidEvent(t *testing.T) {
+	repository := openInteractionHTTPStore(t)
+	account, err := repository.CreateAccount(context.Background())
+	require.NoError(t, err)
+
+	handler := httpapi.NewMux(httpapi.Dependencies{
+		AccountRepository:  repository,
+		InteractionService: ingest.NewInteractionService(repository),
+	})
+
+	body := append(
+		mustJSON(t, ratingSetEvent("550e8400-e29b-41d4-a716-446655440023", 1, 0.8)),
+		[]byte(` {"ignored":true}`)...,
+	)
+
+	recorder := postInteraction(t, handler, account.PlaintextKey, body)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+}
+
 func openInteractionHTTPStore(t *testing.T) *store.Store {
 	t.Helper()
 	dsn := os.Getenv("POSTGRES_TEST_DSN")

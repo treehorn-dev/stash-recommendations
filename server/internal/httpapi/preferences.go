@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/treehorn/stash-recommendations/server/internal/domain"
@@ -28,7 +29,12 @@ func PostInteractions(service InteractionService) http.Handler {
 		}
 
 		var event domain.PreferenceEvent
-		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&event); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}

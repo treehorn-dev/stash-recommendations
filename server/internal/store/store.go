@@ -185,6 +185,10 @@ func (store *Store) AcceptInteractionEvent(ctx context.Context, accountID string
 	}
 	defer tx.Rollback(ctx)
 
+	if err := lockInteractionEvent(ctx, tx, accountID, event.EventID); err != nil {
+		return false, err
+	}
+
 	inserted, err := insertInteractionEvent(ctx, tx, accountID, event, bodyHash)
 	if err != nil {
 		return false, err
@@ -206,9 +210,19 @@ func (store *Store) AcceptInteractionEvent(ctx context.Context, accountID string
 }
 
 func insertInteractionEvent(ctx context.Context, tx pgx.Tx, accountID string, event domain.PreferenceEvent, bodyHash []byte) (bool, error) {
+	existingHash, exists, err := findExistingInteractionEventHash(ctx, tx, accountID, event.EventID)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		if bytes.Equal(existingHash, bodyHash) {
+			return false, nil
+		}
+		return false, ErrInteractionEventConflict
+	}
+
 	var (
 		rowsAffected int64
-		err          error
 		tableName    string
 	)
 
@@ -284,21 +298,21 @@ func insertInteractionEvent(ctx context.Context, tx pgx.Tx, accountID string, ev
 	if rowsAffected == 1 {
 		return true, nil
 	}
-
-	var existingHash []byte
-	if err := tx.QueryRow(ctx, fmt.Sprintf("SELECT body_hash FROM %s WHERE account_id = $1 AND event_id = $2", tableName), accountID, event.EventID).Scan(&existingHash); err != nil {
-		return false, fmt.Errorf("load existing %s replay: %w", tableName, err)
-	}
-	if bytes.Equal(existingHash, bodyHash) {
-		return false, nil
-	}
-	return false, ErrInteractionEventConflict
+	return false, fmt.Errorf("insert %s: interaction event was not persisted", tableName)
 }
 
 func applyCurrentPreference(ctx context.Context, tx pgx.Tx, accountID string, event domain.PreferenceEvent) error {
+	newerExists, err := hasStrictlyNewerPreferenceEvent(ctx, tx, accountID, event)
+	if err != nil {
+		return err
+	}
+	if newerExists {
+		return nil
+	}
+
 	switch event.Kind {
 	case domain.PreferenceEventKindSceneRatingSet:
-		_, err := tx.Exec(ctx, `
+		_, err = tx.Exec(ctx, `
 			INSERT INTO current_preferences (
 				account_id,
 				endpoint,
@@ -329,7 +343,7 @@ func applyCurrentPreference(ctx context.Context, tx pgx.Tx, accountID string, ev
 			return fmt.Errorf("upsert current preference: %w", err)
 		}
 	case domain.PreferenceEventKindSceneRatingRemove:
-		_, err := tx.Exec(ctx, `
+		_, err = tx.Exec(ctx, `
 			DELETE FROM current_preferences
 			WHERE account_id = $1
 				AND endpoint = $2
@@ -354,4 +368,57 @@ func applyCurrentPreference(ctx context.Context, tx pgx.Tx, accountID string, ev
 
 func isRatingEvent(kind string) bool {
 	return kind == domain.PreferenceEventKindSceneRatingSet || kind == domain.PreferenceEventKindSceneRatingRemove
+}
+
+func lockInteractionEvent(ctx context.Context, tx pgx.Tx, accountID string, eventID string) error {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", accountID, eventID); err != nil {
+		return fmt.Errorf("lock interaction event: %w", err)
+	}
+	return nil
+}
+
+func findExistingInteractionEventHash(ctx context.Context, tx pgx.Tx, accountID string, eventID string) ([]byte, bool, error) {
+	var bodyHash []byte
+	err := tx.QueryRow(ctx, `
+		SELECT body_hash
+		FROM (
+			SELECT body_hash FROM preference_events WHERE account_id = $1 AND event_id = $2
+			UNION ALL
+			SELECT body_hash FROM engagement_events WHERE account_id = $1 AND event_id = $2
+		) AS interaction_events
+		LIMIT 1
+	`, accountID, eventID).Scan(&bodyHash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("load existing interaction replay: %w", err)
+	}
+	return bodyHash, true, nil
+}
+
+func hasStrictlyNewerPreferenceEvent(ctx context.Context, tx pgx.Tx, accountID string, event domain.PreferenceEvent) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM preference_events
+			WHERE account_id = $1
+				AND endpoint = $2
+				AND stash_id = $3
+				AND (
+					sequence > $4
+					OR (sequence = $4 AND client_id > $5)
+				)
+		)
+	`,
+		accountID,
+		event.ContentKey.Endpoint,
+		event.ContentKey.StashID,
+		event.Sequence,
+		event.ClientID,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("query newer preference events: %w", err)
+	}
+	return exists, nil
 }

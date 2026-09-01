@@ -58,6 +58,36 @@ func TestRemoveDeletesCurrentPreference(t *testing.T) {
 	require.False(t, hasCurrentPreference(t, pool, account.ID, normalizedContentKey(t)))
 }
 
+func TestOlderRatingDoesNotRecreateProjectionAfterNewerRemove(t *testing.T) {
+	repository, pool := openInteractionTestStore(t)
+	account, err := repository.CreateAccount(context.Background())
+	require.NoError(t, err)
+
+	service := NewInteractionService(repository)
+	ctx := context.Background()
+	key := normalizedContentKey(t)
+
+	accepted, err := service.Accept(ctx, account.ID, ratingSetEvent("550e8400-e29b-41d4-a716-446655440030", 2, 0.8))
+	require.NoError(t, err)
+	require.True(t, accepted)
+
+	accepted, err = service.Accept(ctx, account.ID, ratingRemoveEvent("550e8400-e29b-41d4-a716-446655440031", 3))
+	require.NoError(t, err)
+	require.True(t, accepted)
+	require.False(t, hasCurrentPreference(t, pool, account.ID, key))
+
+	accepted, err = service.Accept(ctx, account.ID, ratingSetEvent("550e8400-e29b-41d4-a716-446655440032", 1, 0.2))
+	require.NoError(t, err)
+	require.True(t, accepted)
+	require.False(t, hasCurrentPreference(t, pool, account.ID, key))
+
+	accepted, err = service.Accept(ctx, account.ID, ratingSetEvent("550e8400-e29b-41d4-a716-446655440033", 4, 1.0))
+	require.NoError(t, err)
+	require.True(t, accepted)
+	require.True(t, hasCurrentPreference(t, pool, account.ID, key))
+	require.Equal(t, 1.0, currentRating(t, pool, account.ID, key))
+}
+
 func TestAcceptRejectsChangedReplay(t *testing.T) {
 	repository, pool := openInteractionTestStore(t)
 	account, err := repository.CreateAccount(context.Background())
@@ -100,6 +130,25 @@ func TestAcceptPersistsEngagementEventsWithoutTouchingRatings(t *testing.T) {
 	require.Equal(t, int64(2), engagementEventCount(t, pool, account.ID))
 	require.Equal(t, int64(1), currentPreferenceCount(t, pool, account.ID))
 	require.Equal(t, 0.6, currentRating(t, pool, account.ID, normalizedContentKey(t)))
+}
+
+func TestAcceptRejectsCrossCategoryReplayUsingSameEventID(t *testing.T) {
+	repository, pool := openInteractionTestStore(t)
+	account, err := repository.CreateAccount(context.Background())
+	require.NoError(t, err)
+
+	service := NewInteractionService(repository)
+	ctx := context.Background()
+
+	accepted, err := service.Accept(ctx, account.ID, ratingSetEvent("550e8400-e29b-41d4-a716-446655440034", 1, 0.6))
+	require.NoError(t, err)
+	require.True(t, accepted)
+
+	accepted, err = service.Accept(ctx, account.ID, playedEvent("550e8400-e29b-41d4-a716-446655440034", 2))
+	require.ErrorIs(t, err, store.ErrInteractionEventConflict)
+	require.False(t, accepted)
+	require.Equal(t, int64(1), preferenceEventCount(t, pool, account.ID))
+	require.Equal(t, int64(0), engagementEventCount(t, pool, account.ID))
 }
 
 func openInteractionTestStore(t *testing.T) (*store.Store, *pgxpool.Pool) {
