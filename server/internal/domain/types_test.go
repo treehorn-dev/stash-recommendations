@@ -147,6 +147,9 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 		{name: "interaction-event.credential-endpoint.invalid.json", valid: false},
 		{name: "interaction-event.query-fragment-endpoint.invalid.json", valid: false},
 		{name: "interaction-event.http-endpoint.invalid.json", valid: false},
+		{name: "interaction-event.uppercase-endpoint.valid.json", valid: true},
+		{name: "interaction-event.empty-query-endpoint.invalid.json", valid: false},
+		{name: "interaction-event.empty-fragment-endpoint.invalid.json", valid: false},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			data, err := os.ReadFile(v1FixturePath(t, fixture.name))
@@ -177,6 +180,8 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 		{name: "source-snapshot.credential-remote-image.invalid.json", valid: false},
 		{name: "source-snapshot.query-fragment-remote-reference.invalid.json", valid: false},
 		{name: "source-snapshot.http-remote-reference.invalid.json", valid: false},
+		{name: "source-snapshot.empty-query-remote-reference.invalid.json", valid: false},
+		{name: "source-snapshot.empty-fragment-remote-reference.invalid.json", valid: false},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			data, err := os.ReadFile(v1FixturePath(t, fixture.name))
@@ -191,6 +196,15 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUppercaseEndpointFixtureNormalizes(t *testing.T) {
+	data, err := os.ReadFile(v1FixturePath(t, "interaction-event.uppercase-endpoint.valid.json"))
+	require.NoError(t, err)
+
+	var event PreferenceEvent
+	require.NoError(t, json.Unmarshal(data, &event))
+	require.Equal(t, "https://box.example/GRAPHQL", event.ContentKey.Endpoint)
 }
 
 func v1FixturePath(t *testing.T, name string) string {

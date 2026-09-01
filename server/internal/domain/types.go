@@ -387,7 +387,7 @@ func parsePublicHTTPSURL(value string) (*url.URL, error) {
 	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" {
 		return nil, fmt.Errorf("must be an absolute HTTPS URL")
 	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if strings.ContainsAny(value, "?#") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, fmt.Errorf("must not contain credentials, query, or fragment")
 	}
 	return parsed, nil

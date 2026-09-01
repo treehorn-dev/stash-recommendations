@@ -19,13 +19,14 @@ def test_preference_event_schema_restricts_v1_interactions_to_utc_timestamps() -
     ]
     assert schema["properties"]["occurred_at"]["pattern"] == "Z$"
     assert schema["additionalProperties"] is False
+    assert schema["$defs"]["content_key"]["properties"]["endpoint"]["pattern"] == r"^[Hh][Tt][Tt][Pp][Ss]://[^/?#@]+(?:/[^?#]*)?$"
 
 
 def test_source_snapshot_schema_requires_public_https_references() -> None:
     schema_path = Path(__file__).parents[3] / "contracts" / "v1" / "source-snapshot.schema.json"
     schema = json.loads(schema_path.read_text())
 
-    assert schema["$defs"]["content_key"]["properties"]["endpoint"]["pattern"] == r"^https://[^/?#@]+(?:/[^?#]*)?$"
+    assert schema["$defs"]["content_key"]["properties"]["endpoint"]["pattern"] == r"^[Hh][Tt][Tt][Pp][Ss]://[^/?#@]+(?:/[^?#]*)?$"
     assert schema["$defs"]["scene"]["properties"]["urls"]["items"] == {"$ref": "#/$defs/https_reference"}
     assert schema["$defs"]["performer"]["properties"]["remote_images"]["items"] == {"$ref": "#/$defs/https_reference"}
 
@@ -170,6 +171,9 @@ def test_snapshot_rejects_invalid_allowed_field_types(scene: dict[str, object], 
         ("interaction-event.credential-endpoint.invalid.json", False),
         ("interaction-event.query-fragment-endpoint.invalid.json", False),
         ("interaction-event.http-endpoint.invalid.json", False),
+        ("interaction-event.uppercase-endpoint.valid.json", True),
+        ("interaction-event.empty-query-endpoint.invalid.json", False),
+        ("interaction-event.empty-fragment-endpoint.invalid.json", False),
     ],
 )
 def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, valid: bool) -> None:
@@ -202,6 +206,8 @@ def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, v
         ("source-snapshot.credential-remote-image.invalid.json", False),
         ("source-snapshot.query-fragment-remote-reference.invalid.json", False),
         ("source-snapshot.http-remote-reference.invalid.json", False),
+        ("source-snapshot.empty-query-remote-reference.invalid.json", False),
+        ("source-snapshot.empty-fragment-remote-reference.invalid.json", False),
     ],
 )
 def test_snapshot_fixtures_have_cross_language_contract_parity(fixture_name: str, valid: bool) -> None:
@@ -222,6 +228,21 @@ def test_snapshot_fixtures_have_cross_language_contract_parity(fixture_name: str
                 captured_at=captured_at,
                 content_key=content_key,
             )
+
+
+def test_uppercase_endpoint_fixture_normalizes() -> None:
+    payload = _load_fixture("interaction-event.uppercase-endpoint.valid.json")
+    occurred_at = datetime.fromisoformat(payload.pop("occurred_at").replace("Z", "+00:00"))
+    content_key = ContentKey(**payload.pop("content_key"))
+    event = PreferenceEvent(
+        **payload,
+        occurred_at=occurred_at,
+        content_key=content_key,
+    )
+
+    event.validate()
+
+    assert event.content_key.endpoint == "https://box.example/GRAPHQL"
 
 
 def _load_fixture(name: str) -> dict[str, object]:
