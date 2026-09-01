@@ -11,21 +11,42 @@ import (
 )
 
 const (
-	argon2Memory      = 64 * 1024
-	argon2Iterations  = 3
-	argon2Parallelism = 2
-	argon2SaltLength  = 16
-	argon2KeyLength   = 32
-	apiKeyLength      = 32
+	argon2Memory       = 64 * 1024
+	argon2Iterations   = 3
+	argon2Parallelism  = 2
+	argon2SaltLength   = 16
+	argon2KeyLength    = 32
+	apiKeyIDLength     = 16
+	apiKeySecretLength = 32
+	apiKeyPrefix       = "srk_"
 )
 
 // NewAPIKey returns a randomly generated bearer credential for an account.
 func NewAPIKey() (string, error) {
-	key := make([]byte, apiKeyLength)
-	if _, err := rand.Read(key); err != nil {
+	identifier := make([]byte, apiKeyIDLength)
+	if _, err := rand.Read(identifier); err != nil {
+		return "", fmt.Errorf("generate API key identifier: %w", err)
+	}
+	secret := make([]byte, apiKeySecretLength)
+	if _, err := rand.Read(secret); err != nil {
 		return "", fmt.Errorf("generate API key: %w", err)
 	}
-	return "srk_" + base64.RawURLEncoding.EncodeToString(key), nil
+	return apiKeyPrefix + base64.RawURLEncoding.EncodeToString(identifier) + "." + base64.RawURLEncoding.EncodeToString(secret), nil
+}
+
+// ParseAPIKey splits a bearer value into its non-secret identifier and secret.
+func ParseAPIKey(plaintext string) (string, string, bool) {
+	if !strings.HasPrefix(plaintext, apiKeyPrefix) {
+		return "", "", false
+	}
+	identifier, secret, ok := strings.Cut(strings.TrimPrefix(plaintext, apiKeyPrefix), ".")
+	if !ok || identifier == "" || secret == "" || strings.Contains(secret, ".") {
+		return "", "", false
+	}
+	if !isCanonicalURLValue(identifier, apiKeyIDLength) || !isCanonicalURLValue(secret, apiKeySecretLength) {
+		return "", "", false
+	}
+	return identifier, secret, true
 }
 
 // HashAPIKey derives a self-describing Argon2id hash suitable for storage.
@@ -84,4 +105,9 @@ func parseHash(encoded string) (uint32, uint32, uint8, []byte, []byte, bool) {
 		return 0, 0, 0, nil, nil, false
 	}
 	return memory, iterations, parallelism, salt, hash, true
+}
+
+func isCanonicalURLValue(value string, expectedLength int) bool {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	return err == nil && len(decoded) == expectedLength && base64.RawURLEncoding.EncodeToString(decoded) == value
 }

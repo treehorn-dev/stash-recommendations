@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,27 +15,38 @@ import (
 
 func TestAuthenticateAcceptsOnlyTheOwningAccountKey(t *testing.T) {
 	repository := openTestAccountRepository(t)
-	account, err := repository.CreateAccount(context.Background())
+	firstAccount, err := repository.CreateAccount(context.Background())
+	require.NoError(t, err)
+	secondAccount, err := repository.CreateAccount(context.Background())
 	require.NoError(t, err)
 
 	handler := httpapi.RequireAccount(repository)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authenticatedAccount, ok := httpapi.AccountFromContext(r.Context())
 		require.True(t, ok)
-		require.Equal(t, account.ID, authenticatedAccount.ID)
-		w.WriteHeader(http.StatusNoContent)
+		_, err := w.Write([]byte(authenticatedAccount.ID))
+		require.NoError(t, err)
 	}))
 
-	validRequest := httptest.NewRequest(http.MethodGet, "/protected", nil)
-	validRequest.Header.Set("Authorization", "Bearer "+account.PlaintextKey)
-	validRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(validRecorder, validRequest)
-	require.Equal(t, http.StatusNoContent, validRecorder.Code)
+	require.Equal(t, firstAccount.ID, authenticatedAccountID(t, handler, firstAccount.PlaintextKey))
+	require.Equal(t, secondAccount.ID, authenticatedAccountID(t, handler, secondAccount.PlaintextKey))
 
 	invalidRequest := httptest.NewRequest(http.MethodGet, "/protected", nil)
 	invalidRequest.Header.Set("Authorization", "Bearer not-an-issued-key")
 	invalidRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(invalidRecorder, invalidRequest)
 	require.Equal(t, http.StatusUnauthorized, invalidRecorder.Code)
+}
+
+func authenticatedAccountID(t *testing.T, handler http.Handler, plaintextKey string) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.Header.Set("Authorization", "Bearer "+plaintextKey)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body, err := io.ReadAll(recorder.Result().Body)
+	require.NoError(t, err)
+	return string(body)
 }
 
 func openTestAccountRepository(t *testing.T) *store.Store {
