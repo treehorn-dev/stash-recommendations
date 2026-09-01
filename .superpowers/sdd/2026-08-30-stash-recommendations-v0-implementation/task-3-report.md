@@ -20,6 +20,28 @@ Final verification:
 - `node --test tests/ui/*.test.js`: PASS, `1` test.
 - `git diff --check`: clean.
 
+## Fix Round 3
+
+Added `003_legacy_api_key_auth`. It marks only the API keys backfilled by
+`002` as legacy and adds a partial index for those rows. New
+`srk_<id>.<secret>` bearers still select one `key_id` row before Argon2id
+verification. Only canonical pre-identifier bearers use a compatibility path,
+which reads and verifies at most `64` `legacy_key` rows and never scans modern
+keys.
+
+TDD evidence:
+
+- RED: the upgraded legacy-schema test failed because `legacy_key` did not
+  exist after the pre-fix migration run.
+- GREEN: the test seeds an old opaque `srk_` bearer and Argon2 hash, upgrades
+  through all migrations, then authenticates that same bearer to its original
+  account while a newly issued bearer continues to authenticate normally.
+
+Final verification:
+
+- `POSTGRES_TEST_DSN=postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable go test ./server/... -v`: PASS.
+- `git diff --check`: clean.
+
 ## Fix Round 2
 
 Migrations now use a transaction-scoped advisory lock plus ordered
