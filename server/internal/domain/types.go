@@ -1,7 +1,10 @@
 package domain
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"regexp"
 	"strings"
@@ -45,6 +48,16 @@ func (key *ContentKey) NormalizeInPlace() error {
 		return err
 	}
 	*key = normalized
+	return nil
+}
+
+func (key *ContentKey) UnmarshalJSON(data []byte) error {
+	type contentKey ContentKey
+	var value contentKey
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	*key = ContentKey(value)
 	return nil
 }
 
@@ -116,7 +129,38 @@ func (snapshot *SourceSnapshot) Validate() error {
 	if err := snapshot.ContentKey.NormalizeInPlace(); err != nil {
 		return fmt.Errorf("content_key: %w", err)
 	}
+	if snapshot.Scenes == nil || snapshot.Performers == nil {
+		return fmt.Errorf("scenes and performers must be arrays")
+	}
+	for index := range snapshot.Scenes {
+		if err := snapshot.Scenes[index].Validate(); err != nil {
+			return fmt.Errorf("scenes[%d]: %w", index, err)
+		}
+	}
+	for index := range snapshot.Performers {
+		if err := snapshot.Performers[index].Validate(); err != nil {
+			return fmt.Errorf("performers[%d]: %w", index, err)
+		}
+	}
 	return nil
+}
+
+func (snapshot *SourceSnapshot) UnmarshalJSON(data []byte) error {
+	type sourceSnapshot SourceSnapshot
+	var value sourceSnapshot
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	*snapshot = SourceSnapshot(value)
+	return snapshot.Validate()
+}
+
+func (snapshot SourceSnapshot) MarshalJSON() ([]byte, error) {
+	if err := (&snapshot).Validate(); err != nil {
+		return nil, err
+	}
+	type sourceSnapshot SourceSnapshot
+	return json.Marshal(sourceSnapshot(snapshot))
 }
 
 type Scene struct {
@@ -134,6 +178,36 @@ type Scene struct {
 	RemoteImages         []string              `json:"remote_images,omitempty"`
 }
 
+func (scene *Scene) Validate() error {
+	if strings.TrimSpace(scene.ID) == "" {
+		return fmt.Errorf("scene id is required")
+	}
+	if scene.Studio != nil && (strings.TrimSpace(scene.Studio.ID) == "" || strings.TrimSpace(scene.Studio.Name) == "") {
+		return fmt.Errorf("studio id and name are required")
+	}
+	for index, tag := range scene.Tags {
+		if strings.TrimSpace(tag.ID) == "" || strings.TrimSpace(tag.Name) == "" {
+			return fmt.Errorf("tags[%d] id and name are required", index)
+		}
+	}
+	for index, appearance := range scene.PerformerAppearances {
+		if strings.TrimSpace(appearance.PerformerID) == "" {
+			return fmt.Errorf("performer_appearances[%d] performer_id is required", index)
+		}
+	}
+	return nil
+}
+
+func (scene *Scene) UnmarshalJSON(data []byte) error {
+	type sceneValue Scene
+	var value sceneValue
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	*scene = Scene(value)
+	return nil
+}
+
 type Performer struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
@@ -149,9 +223,36 @@ type Performer struct {
 	RemoteImages []string `json:"remote_images,omitempty"`
 }
 
+func (performer *Performer) Validate() error {
+	if strings.TrimSpace(performer.ID) == "" || strings.TrimSpace(performer.Name) == "" {
+		return fmt.Errorf("performer id and name are required")
+	}
+	return nil
+}
+
+func (performer *Performer) UnmarshalJSON(data []byte) error {
+	type performerValue Performer
+	var value performerValue
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	*performer = Performer(value)
+	return nil
+}
+
 type Studio struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+func (studio *Studio) UnmarshalJSON(data []byte) error {
+	type studioValue Studio
+	var value studioValue
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	*studio = Studio(value)
+	return nil
 }
 
 type Tag struct {
@@ -159,6 +260,38 @@ type Tag struct {
 	Name string `json:"name"`
 }
 
+func (tag *Tag) UnmarshalJSON(data []byte) error {
+	type tagValue Tag
+	var value tagValue
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	*tag = Tag(value)
+	return nil
+}
+
 type PerformerAppearance struct {
 	PerformerID string `json:"performer_id"`
+}
+
+func (appearance *PerformerAppearance) UnmarshalJSON(data []byte) error {
+	type appearanceValue PerformerAppearance
+	var value appearanceValue
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	*appearance = PerformerAppearance(value)
+	return nil
+}
+
+func strictUnmarshalJSON(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("invalid trailing JSON data")
+	}
+	return nil
 }

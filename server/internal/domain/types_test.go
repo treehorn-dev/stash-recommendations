@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -40,6 +41,49 @@ func TestPreferenceEventValidateAcceptsUUIDVersionSeven(t *testing.T) {
 	}
 
 	require.NoError(t, event.Validate())
+}
+
+func TestSourceSnapshotDecodeRejectsPrivacyFields(t *testing.T) {
+	for _, field := range []string{"paths", "files", "rating100", "play_count", "custom_fields"} {
+		t.Run(field, func(t *testing.T) {
+			var snapshot SourceSnapshot
+			err := json.Unmarshal([]byte(`{
+				"schema_version": 1,
+				"content_key": {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
+				"captured_at": "2026-08-30T00:00:00Z",
+				"scenes": [{"id": "scene-1", "`+field+`": "private"}],
+				"performers": []
+			}`), &snapshot)
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), field)
+		})
+	}
+}
+
+func TestSourceSnapshotValidateRequiresArraysAndNestedRequiredFields(t *testing.T) {
+	snapshot := SourceSnapshot{
+		SchemaVersion: 1,
+		ContentKey:    ContentKey{Endpoint: "https://box.example/graphql", StashID: "scene-1"},
+		CapturedAt:    time.Now().UTC(),
+	}
+	require.Error(t, snapshot.Validate())
+
+	snapshot.Scenes = []Scene{{}}
+	snapshot.Performers = []Performer{{ID: "performer-1"}}
+	require.Error(t, snapshot.Validate())
+}
+
+func TestSourceSnapshotMarshalRejectsNilArrays(t *testing.T) {
+	snapshot := SourceSnapshot{
+		SchemaVersion: 1,
+		ContentKey:    ContentKey{Endpoint: "https://box.example/graphql", StashID: "scene-1"},
+		CapturedAt:    time.Now().UTC(),
+	}
+
+	_, err := json.Marshal(snapshot)
+
+	require.Error(t, err)
 }
 
 func pointerTo(value float64) *float64 {
