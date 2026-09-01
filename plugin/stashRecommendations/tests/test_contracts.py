@@ -32,6 +32,19 @@ def test_source_snapshot_schema_requires_public_https_references() -> None:
     assert "source_updated_at" in schema["required"]
 
 
+def test_source_snapshot_accepts_named_groups() -> None:
+    snapshot = SourceSnapshot(
+        schema_version=1,
+        content_key=ContentKey.normalize("https://box.example/graphql", "scene-1"),
+        captured_at=datetime.now(timezone.utc),
+        source_updated_at=datetime.now(timezone.utc),
+        scenes=[{"id": "scene-1", "groups": [{"id": "group-1", "name": "Series"}]}],
+        performers=[],
+    )
+
+    assert snapshot.to_dict()["scenes"][0]["groups"] == [{"id": "group-1", "name": "Series"}]
+
+
 def test_rating_remove_serializes_without_rating() -> None:
     event = PreferenceEvent(
         schema_version=1,

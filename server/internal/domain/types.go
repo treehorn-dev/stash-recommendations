@@ -218,6 +218,7 @@ type Scene struct {
 	Code                 string                `json:"code,omitempty"`
 	Studio               *Studio               `json:"studio,omitempty"`
 	Tags                 []Tag                 `json:"tags,omitempty"`
+	Groups               []Group               `json:"groups,omitempty"`
 	PerformerAppearances []PerformerAppearance `json:"performer_appearances,omitempty"`
 	RemoteImages         []string              `json:"remote_images,omitempty"`
 }
@@ -248,6 +249,11 @@ func (scene *Scene) Validate() error {
 			return fmt.Errorf("tags[%d] id and name are required", index)
 		}
 	}
+	for index, group := range scene.Groups {
+		if strings.TrimSpace(group.ID) == "" || strings.TrimSpace(group.Name) == "" {
+			return fmt.Errorf("groups[%d] id and name are required", index)
+		}
+	}
 	for index, appearance := range scene.PerformerAppearances {
 		if strings.TrimSpace(appearance.PerformerID) == "" {
 			return fmt.Errorf("performer_appearances[%d] performer_id is required", index)
@@ -257,7 +263,7 @@ func (scene *Scene) Validate() error {
 }
 
 func (scene *Scene) UnmarshalJSON(data []byte) error {
-	if err := rejectNullFields(data, "id", "title", "details", "dates", "urls", "duration", "director", "code", "studio", "tags", "performer_appearances", "remote_images"); err != nil {
+	if err := rejectNullFields(data, "id", "title", "details", "dates", "urls", "duration", "director", "code", "studio", "tags", "groups", "performer_appearances", "remote_images"); err != nil {
 		return err
 	}
 	type sceneValue Scene
@@ -331,6 +337,24 @@ func (studio *Studio) UnmarshalJSON(data []byte) error {
 type Tag struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+type Group struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (group *Group) UnmarshalJSON(data []byte) error {
+	if err := rejectNullFields(data, "id", "name"); err != nil {
+		return err
+	}
+	type groupValue Group
+	var value groupValue
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	*group = Group(value)
+	return nil
 }
 
 func (tag *Tag) UnmarshalJSON(data []byte) error {

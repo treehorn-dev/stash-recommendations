@@ -65,6 +65,21 @@ func TestSourceSnapshotDecodeRejectsPrivacyFields(t *testing.T) {
 	}
 }
 
+func TestSourceSnapshotDecodeAcceptsNamedGroups(t *testing.T) {
+	var snapshot SourceSnapshot
+	err := json.Unmarshal([]byte(`{
+		"schema_version": 1,
+		"content_key": {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
+		"captured_at": "2026-08-30T00:00:00Z",
+		"source_updated_at": "2026-08-30T00:00:00Z",
+		"scenes": [{"id": "scene-1", "groups": [{"id": "group-1", "name": "Series"}]}],
+		"performers": []
+	}`), &snapshot)
+
+	require.NoError(t, err)
+	require.Equal(t, []Group{{ID: "group-1", Name: "Series"}}, snapshot.Scenes[0].Groups)
+}
+
 func TestSourceSnapshotValidateRequiresArraysAndNestedRequiredFields(t *testing.T) {
 	snapshot := SourceSnapshot{
 		SchemaVersion: 1,

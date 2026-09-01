@@ -191,3 +191,69 @@ passed after implementation, including active-version rollback coverage.
 
 Concern: group similarity remains intentionally unavailable until a validated
 group relation exists in the catalog schema.
+
+## Fix Round 2/5
+
+Addressed the two open Task 7 review findings without starting Task 8.
+
+- Behavioral collaborative and session edges are no longer filtered through
+  `source_scenes`. Snapshot-less sources therefore retain related and For You
+  recommendations generated from ratings/sessions; recommendation reads retain
+  nullable `canonical_url` metadata.
+- Added validated snapshot `groups` as endpoint-qualified named records, plus
+  `source_groups` and `source_scene_groups` PostgreSQL projections in migration
+  `008_source_catalog_groups`.
+- Snapshot upsert/read projections now preserve group relationships. The model
+  query generates `shared_group` catalog candidates from those projections.
+- Updated API assertions that deliberately seeded a behavior-only scene; it is
+  now correctly returned rather than silently filtered.
+
+### TDD evidence
+
+RED:
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/model -run 'TestBuildPreservesBehavioralRecommendationsWithoutCatalogMetadata|TestCatalogCandidatesIncludeSharedGroups' -v
+```
+
+Result: behavioral related output was empty because `filterCatalogedEdges`
+removed snapshot-less session candidates; group setup failed with
+`relation "source_groups" does not exist`.
+
+```bash
+POSTGRES_TEST_DSN='postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable' \
+go test ./server/internal/domain -run TestSourceSnapshotDecodeAcceptsNamedGroups -v
+```
+
+Result: failed to compile because `domain.Group` and `Scene.Groups` did not
+exist.
+
+GREEN focused evidence:
+
+- `TestBuildPreservesBehavioralRecommendationsWithoutCatalogMetadata`: PASS;
+  it proves related and For You output from sessions alone with no
+  `source_scenes`/`source_configs` rows and `canonical_url == nil`.
+- `TestCatalogCandidatesIncludeSharedGroups`: PASS.
+- `TestSourceSnapshotDecodeAcceptsNamedGroups`: PASS.
+- Catalog snapshot relation/read tests: PASS.
+- Python `test_source_snapshot_accepts_named_groups`: PASS.
+
+### Verification
+
+- `POSTGRES_TEST_DSN=... go test ./server/... -v`: PASS.
+- `go vet ./server/...`: PASS.
+- `git diff --check`: clean.
+- `PYTHONPATH=plugin/stashRecommendations:<cached pytest dependencies> python3 -m pytest plugin/stashRecommendations/tests/test_contracts.py -q`: 48 passed.
+
+The normal Python runtime did not include pytest. The cached local pytest
+runtime was used with `PYTHONPATH`; no dependency installation or repository
+configuration change was made.
+
+### Files
+
+- Changed: shared snapshot contracts, catalog/domain/store projections, model
+  candidate generation, recommendation API expectations, and their tests.
+- Added: `server/internal/store/migrations/008_source_catalog_groups.sql`.
+
+Concern: none. Task 8 has not started.
