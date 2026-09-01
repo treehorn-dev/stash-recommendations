@@ -77,6 +77,13 @@ class Outbox:
             payload=json.loads(row[4]),
         )
 
+    def has_event_id(self, event_id: str) -> bool:
+        row = self._fetchone(
+            "SELECT 1 FROM outbox WHERE event_id = ? LIMIT 1",
+            (event_id,),
+        )
+        return row is not None
+
     def ack(self, row_id: int) -> None:
         with self._connect() as connection:
             row = connection.execute(

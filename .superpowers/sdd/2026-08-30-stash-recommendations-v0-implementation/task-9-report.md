@@ -132,3 +132,54 @@ git diff --check
 ```
 
 Result: clean.
+
+## Fix Round 2
+
+External review found two scoped Task 9 gaps:
+- deterministic engagement re-import could hit a duplicate outbox `event_id`
+  integrity error if a crash left a pending outbox row without the matching
+  `synced_history_events` marker
+- metadata sync aborted on the first per-key source fetch or snapshot-mapping
+  error, preventing later configured keys from being queued in the same run
+
+### RED
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests/test_sync.py -q
+```
+
+Result before the fix: FAIL, `2 failed, 5 passed`.
+
+Failures proved:
+- a pending deterministic engagement event with its history marker removed was
+  re-generated and crashed on `UNIQUE constraint failed: outbox.event_id`
+- a source scene missing `updated` raised `source_updated_at is required` and
+  stopped `queue_metadata_sync()` before later configured keys were processed
+
+### GREEN
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests/test_sync.py -q
+```
+
+Result after the fix: PASS, `7 passed in 2.09s`.
+
+### Verification
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests/test_capture.py plugin/stashRecommendations/tests/test_source_client.py plugin/stashRecommendations/tests/test_snapshots.py plugin/stashRecommendations/tests/test_sync.py -q
+```
+
+Result: PASS, `16 passed in 2.09s`.
+
+```bash
+make test-plugin
+```
+
+Result: PASS, `79 passed in 2.17s`.
+
+```bash
+git diff --check
+```
+
+Result: clean.
