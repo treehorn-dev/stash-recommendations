@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -31,6 +32,10 @@ class Settings:
             "api_key_configured": bool(self.api_key),
             "show_remote_results": self.show_remote_results,
         }
+
+    def delivery_pause_key(self) -> str:
+        material = f"{self.service_url}\0{self.api_key}".encode("utf-8")
+        return hashlib.sha256(material).hexdigest()
 
 
 def _normalize_service_url(value: str) -> str:

@@ -19,12 +19,30 @@ def test_401_pauses_delivery_and_persists_auth_status(tmp_path: Path, monkeypatc
     outbox = seeded_outbox(tmp_path)
     client = FakeServiceClient([ServiceResponse(status_code=401)])
 
-    result = DeliveryWorker(outbox, client).deliver_ready(NOW)
+    result = DeliveryWorker(outbox, client, pause_key="auth-a").deliver_ready(NOW)
 
     assert result.paused is True
     assert result.delivered == 0
     assert result.retried == 0
     assert result.quarantined == 0
+    assert outbox.status()["paused"] == {
+        "active": True,
+        "reason": "service authentication failed",
+    }
+    assert outbox.status()["pending"]["rating"] == 1
+
+
+def test_401_pause_blocks_later_delivery_runs_until_pause_key_changes(tmp_path: Path, monkeypatch: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    outbox = seeded_outbox(tmp_path)
+    client = FakeServiceClient([ServiceResponse(status_code=401), ServiceResponse(status_code=202)])
+
+    first = DeliveryWorker(outbox, client, pause_key="auth-a").deliver_ready(NOW)
+    second = DeliveryWorker(outbox, client, pause_key="auth-a").deliver_ready(NOW + timedelta(minutes=2))
+
+    assert first.paused is True
+    assert second.paused is True
+    assert len(client.preference_events) == 1
     assert outbox.status()["paused"] == {
         "active": True,
         "reason": "service authentication failed",
@@ -156,6 +174,30 @@ def test_fetch_for_you_mode_proxies_authenticated_read_without_api_key_markup(
     assert "secret-api-key" not in encoded
 
 
+def test_status_clears_paused_auth_when_settings_change(tmp_path: Path, monkeypatch: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    outbox = seeded_outbox(tmp_path)
+    outbox.pause_delivery("service authentication failed", pause_key="auth-a")
+    monkeypatch.setattr(
+        "recommendations.StashClient",
+        lambda server_connection: FakeConfiguredStash(tmp_path, api_key="new-secret-api-key"),
+    )
+
+    output: dict[str, object] = {}
+    run(
+        {
+            "server_connection": {"PluginDir": str(tmp_path)},
+            "args": {"mode": "status"},
+        },
+        output,
+    )
+
+    assert output["output"]["outbox"]["paused"] == {
+        "active": False,
+        "reason": None,
+    }
+
+
 def seeded_outbox(tmp_path: Path) -> Outbox:
     outbox = Outbox(tmp_path / "recommendations.sqlite3")
     outbox.enqueue(
@@ -211,14 +253,16 @@ def freeze_outbox_now(monkeypatch: object) -> None:
 
 
 class FakeConfiguredStash:
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, api_key: str = "secret-api-key", service_url: str = "https://stashrec.example") -> None:
         self._tmp_path = tmp_path
+        self._api_key = api_key
+        self._service_url = service_url
 
     def plugin_config(self, plugin_id: str) -> dict[str, object]:
         assert plugin_id == "stashRecommendations"
         return {
-            "service_url": "https://stashrec.example",
-            "api_key": "secret-api-key",
+            "service_url": self._service_url,
+            "api_key": self._api_key,
             "show_remote_results": False,
         }
 

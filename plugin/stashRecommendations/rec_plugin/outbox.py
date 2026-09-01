@@ -137,7 +137,7 @@ class Outbox:
                 ),
             )
 
-    def pause_delivery(self, reason: str) -> None:
+    def pause_delivery(self, reason: str, pause_key: str | None = None) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
@@ -147,10 +147,49 @@ class Outbox:
                 """,
                 (reason, _isoformat(_utcnow())),
             )
+            if pause_key is not None:
+                connection.execute(
+                    """
+                    INSERT INTO delivery_state(state_key, state_value, updated_at)
+                    VALUES('paused_key', ?, ?)
+                    ON CONFLICT(state_key) DO UPDATE SET state_value = excluded.state_value, updated_at = excluded.updated_at
+                    """,
+                    (pause_key, _isoformat(_utcnow())),
+                )
 
     def resume_delivery(self) -> None:
         with self._connect() as connection:
-            connection.execute("DELETE FROM delivery_state WHERE state_key = 'paused_reason'")
+            connection.execute(
+                "DELETE FROM delivery_state WHERE state_key IN ('paused_reason', 'paused_key')"
+            )
+
+    def sync_delivery_pause(self, pause_key: str | None) -> bool:
+        with self._connect() as connection:
+            paused_reason = connection.execute(
+                "SELECT state_value FROM delivery_state WHERE state_key = 'paused_reason'"
+            ).fetchone()
+            if paused_reason is None:
+                return False
+            paused_key = connection.execute(
+                "SELECT state_value FROM delivery_state WHERE state_key = 'paused_key'"
+            ).fetchone()
+            if paused_key is None:
+                if pause_key is not None:
+                    connection.execute(
+                        """
+                        INSERT INTO delivery_state(state_key, state_value, updated_at)
+                        VALUES('paused_key', ?, ?)
+                        ON CONFLICT(state_key) DO UPDATE SET state_value = excluded.state_value, updated_at = excluded.updated_at
+                        """,
+                        (pause_key, _isoformat(_utcnow())),
+                    )
+                return True
+            if pause_key is not None and paused_key[0] != pause_key:
+                connection.execute(
+                    "DELETE FROM delivery_state WHERE state_key IN ('paused_reason', 'paused_key')"
+                )
+                return False
+            return True
 
     def quarantine(self, row_id: int, error: str) -> None:
         with self._connect() as connection:

@@ -1,6 +1,5 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
 
 const modulePath = path.resolve(
@@ -95,16 +94,131 @@ test("fetchForYou uses the plugin task proxy and limit override", async () => {
   assert.deepEqual(calls, [{ mode: "fetch-for-you", limit: 8 }]);
 });
 
-test("plugin UI registers route, nav, scene tab, and hides API key markup", () => {
-  const source = fs.readFileSync(modulePath, "utf8");
+test("plugin UI registers route, nav, scene tab, and never renders a seeded API key", () => {
+  const state = {
+    error: "",
+    items: [],
+    loading: false,
+    modelVersion: "",
+    status: {
+      configured: true,
+      settings: {
+        api_key: "seeded-secret-api-key",
+        api_key_configured: true,
+        show_remote_results: false,
+      },
+      outbox: {
+        pending: {},
+        delivered: {},
+        paused: {
+          active: true,
+          reason: "service authentication failed",
+        },
+      },
+    },
+  };
+  const { routes, patches } = registerUi(state);
+  const route = routes.find((entry) => entry.path === "/plugins/stash-recommendations");
 
-  assert.equal(source.includes('PluginApi.register.route("/plugins/stash-recommendations"'), true);
-  assert.equal(source.includes('PluginApi.patch.before("MainNavBar.MenuItems"'), true);
-  assert.equal(source.includes('PluginApi.patch.before("ScenePage.Tabs"'), true);
-  assert.equal(source.includes('PluginApi.patch.before("ScenePage.TabContent"'), true);
-  assert.equal(source.includes("Loading recommendations..."), true);
-  assert.equal(source.includes("Configure the StashRec service URL and API key."), true);
-  assert.equal(source.includes("No recommendations yet."), true);
-  assert.equal(source.includes("api_key_configured"), true);
-  assert.equal(source.includes("settings.api_key"), false);
+  assert.ok(route);
+  assert.deepEqual(
+    patches.map((entry) => entry.name),
+    ["ScenePage.Tabs", "ScenePage.TabContent", "MainNavBar.MenuItems"]
+  );
+
+  const markup = renderMarkup(route.component({}));
+
+  assert.match(markup, /service authentication failed/);
+  assert.doesNotMatch(markup, /seeded-secret-api-key/);
 });
+
+function registerUi(state) {
+  const routes = [];
+  const patches = [];
+  const React = createReactHarness(state);
+  const PluginApi = {
+    React,
+    libraries: {
+      Apollo: {
+        gql(strings, ...values) {
+          return strings.reduce((joined, part, index) => joined + part + (values[index] ?? ""), "");
+        },
+      },
+      Bootstrap: {
+        Nav: { Item: "nav-item", Link: "nav-link" },
+        Tab: { Pane: "tab-pane" },
+        Button: "button",
+      },
+      ReactRouterDOM: {
+        NavLink: "nav-link",
+      },
+    },
+    utils: {
+      StashService: {
+        getClient() {
+          return {
+            mutate: async () => ({ data: { runPluginOperation: JSON.stringify({ output: { items: [], model_version: "" } }) } }),
+            query: async () => ({ data: {} }),
+          };
+        },
+      },
+    },
+    register: {
+      route(path, component) {
+        routes.push({ path, component });
+      },
+    },
+    patch: {
+      before(name, apply) {
+        patches.push({ name, apply });
+      },
+    },
+  };
+
+  require(modulePath).register(PluginApi, { location: { pathname: "/scenes/44", hash: "" } });
+
+  return { routes, patches };
+}
+
+function createReactHarness(state) {
+  const Fragment = Symbol("Fragment");
+
+  return {
+    Fragment,
+    createElement(type, props, ...children) {
+      const normalizedProps = {
+        ...(props || {}),
+        children: children.length <= 1 ? children[0] : children,
+      };
+      if (typeof type === "function") {
+        return type(normalizedProps);
+      }
+      return { type, props: normalizedProps };
+    },
+    useEffect() {},
+    useState() {
+      return [state, () => {}];
+    },
+  };
+}
+
+function renderMarkup(node) {
+  if (node == null || node === false) {
+    return "";
+  }
+  if (Array.isArray(node)) {
+    return node.map(renderMarkup).join("");
+  }
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (typeof node.type === "symbol") {
+    return renderMarkup(node.props?.children);
+  }
+  const props = node.props || {};
+  const attributes = Object.entries(props)
+    .filter(([key, value]) => key !== "children" && value != null && typeof value !== "function")
+    .map(([key, value]) => ` ${key}=\"${String(value)}\"`)
+    .join("");
+  return `<${String(node.type)}${attributes}>${renderMarkup(props.children)}</${String(node.type)}>`;
+}

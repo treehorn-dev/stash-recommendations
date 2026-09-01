@@ -51,6 +51,7 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
     if mode == "status":
         plugin_config = stash.plugin_config(PLUGIN_ID)
         settings = Settings.from_plugin_config(plugin_config)
+        outbox.sync_delivery_pause(settings.delivery_pause_key())
         output["output"] = build_status_output(settings, outbox.status())
         return
     if mode == "sync-ratings":
@@ -70,10 +71,15 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
     if mode == "deliver-outbox":
         plugin_config = stash.plugin_config(PLUGIN_ID)
         settings = Settings.from_plugin_config(plugin_config)
+        outbox.sync_delivery_pause(settings.delivery_pause_key())
         if not settings.service_url or not settings.api_key:
             output["output"] = build_status_output(settings, outbox.status())
             return
-        delivery = DeliveryWorker(outbox, ServiceClient(settings)).deliver_ready(_utcnow())
+        delivery = DeliveryWorker(
+            outbox,
+            ServiceClient(settings),
+            pause_key=settings.delivery_pause_key(),
+        ).deliver_ready(_utcnow())
         payload = build_status_output(settings, outbox.status())
         payload["delivery"] = {
             "delivered": delivery.delivered,
