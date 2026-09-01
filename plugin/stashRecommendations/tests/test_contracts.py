@@ -29,6 +29,8 @@ def test_source_snapshot_schema_requires_public_https_references() -> None:
     assert schema["$defs"]["content_key"]["properties"]["endpoint"]["pattern"] == r"^[Hh][Tt][Tt][Pp][Ss]://[^/?#@]+(?:/[^?#]*)?$"
     assert schema["$defs"]["scene"]["properties"]["urls"]["items"] == {"$ref": "#/$defs/https_reference"}
     assert schema["$defs"]["performer"]["properties"]["remote_images"]["items"] == {"$ref": "#/$defs/https_reference"}
+    assert schema["$defs"]["group"]["properties"]["id"]["pattern"] == r".*\S.*"
+    assert schema["$defs"]["group"]["properties"]["name"]["pattern"] == r".*\S.*"
     assert "source_updated_at" in schema["required"]
 
 
@@ -218,6 +220,7 @@ def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, v
     ("fixture_name", "valid"),
     [
         ("source-snapshot.valid.json", True),
+        ("source-snapshot.group.valid.json", True),
         ("source-snapshot.missing-appearance-performer.invalid.json", False),
         ("source-snapshot.missing-source-updated-at.invalid.json", False),
         ("source-snapshot.boolean-duration.invalid.json", False),
@@ -231,6 +234,7 @@ def test_event_fixtures_have_cross_language_contract_parity(fixture_name: str, v
         ("source-snapshot.http-remote-reference.invalid.json", False),
         ("source-snapshot.empty-query-remote-reference.invalid.json", False),
         ("source-snapshot.empty-fragment-remote-reference.invalid.json", False),
+        ("source-snapshot.blank-group.invalid.json", False),
     ],
 )
 def test_snapshot_fixtures_have_cross_language_contract_parity(fixture_name: str, valid: bool) -> None:

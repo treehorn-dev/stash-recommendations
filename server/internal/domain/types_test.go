@@ -187,6 +187,7 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 		valid bool
 	}{
 		{name: "source-snapshot.valid.json", valid: true},
+		{name: "source-snapshot.group.valid.json", valid: true},
 		{name: "source-snapshot.missing-appearance-performer.invalid.json", valid: false},
 		{name: "source-snapshot.missing-source-updated-at.invalid.json", valid: false},
 		{name: "source-snapshot.boolean-duration.invalid.json", valid: false},
@@ -200,6 +201,7 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 		{name: "source-snapshot.http-remote-reference.invalid.json", valid: false},
 		{name: "source-snapshot.empty-query-remote-reference.invalid.json", valid: false},
 		{name: "source-snapshot.empty-fragment-remote-reference.invalid.json", valid: false},
+		{name: "source-snapshot.blank-group.invalid.json", valid: false},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			data, err := os.ReadFile(v1FixturePath(t, fixture.name))
