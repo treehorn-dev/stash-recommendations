@@ -109,3 +109,54 @@
 - Python validates snapshot dictionaries at construction and rejects the same unknown fields, including `paths`, `files`, `rating100`, `play_count`, and `custom_fields`.
 - Both implementations reject missing scene IDs, performer IDs/names, absent snapshot arrays, and invalid serialized snapshots.
 - Python schema-version and sequence checks use exact `int` types to exclude booleans and floats. UUID validation requires Go-compatible hyphenated UUID text.
+
+## Fix Round 2: Interaction Kinds and Strict Nested Values
+
+### Changed Paths
+
+- `contracts/v1/preference-event.schema.json`: permits only rating-set, rating-remove, play, and o interactions; requires UTC `Z` timestamps.
+- `contracts/v1/fixtures/`: adds valid play/o, invalid boolean-rating, invalid engagement-with-rating, invalid non-UTC, and invalid nested snapshot fixtures.
+- `server/internal/domain/types.go`: validates only the four V1 interaction kinds, finite ratings, UTC event times, null-free required/nested fields, valid scene dates, and strict interaction JSON payloads.
+- `server/internal/domain/types_test.go`: exercises local-field rejection and loads every V1 fixture with Go validation.
+- `plugin/stashRecommendations/rec_plugin/contracts.py`: validates malformed nested collections and types as `ValueError` contract errors, and serializes all non-rating-set interactions without `rating`.
+- `plugin/stashRecommendations/tests/test_contracts.py`: loads every V1 fixture with Python validation and asserts the schema interaction/UTC boundary.
+
+### RED Evidence
+
+1. `go test ./server/internal/domain -v`
+
+   Output: `FAIL` because the new cross-language parity test referenced a fixture catalog that did not exist and relied on the test binary working directory.
+
+2. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py`
+
+   Output: `7 failed, 17 passed`; every failure was a missing fixture (`FileNotFoundError`), establishing the shared-fixture contract gap.
+
+3. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py -k schema_restricts`
+
+   Output: `KeyError: 'pattern'`; the shared schema did not require the UTC `Z` suffix enforced by the runtime validators.
+
+### GREEN Evidence
+
+1. `go test ./server/internal/domain -v`
+
+   Output: `PASS`, including all 12 shared fixtures and local-field rejection checks.
+
+2. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py`
+
+   Output: `30 passed in 0.04s`.
+
+3. `git diff --check`
+
+   Output: exit `0` with no output.
+
+### Self-Review
+
+- Both languages load every JSON fixture and agree on its valid/invalid result, including invalid boolean rating/duration/career-years values, scalar dates, and `tags: null`.
+- Python collection validation converts malformed nested input into `ValueError`; no incidental `TypeError` remains for the required cases.
+- Interaction payloads accept exactly `scene.rating.set`, `scene.rating.remove`, `scene.played`, and `scene.o`. Rating is finite numeric `[0,1]` for set and prohibited for the other three kinds.
+- Go rejects local IDs, duration, resume, file, and player fields by strict interaction decoding; the shared schema rejects every unlisted interaction field.
+- This round contains no Task 3+ changes.
+
+### Commit
+
+- `a4af556 fix: enforce strict interaction contract parity`
