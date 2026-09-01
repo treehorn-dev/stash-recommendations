@@ -202,3 +202,53 @@
 ### Commit
 
 - `20d5797 test: add invalid source date fixture`
+
+## Fix Round 4: Public HTTPS URL Privacy Policy
+
+### Changed Paths
+
+- `contracts/v1/preference-event.schema.json`: constrains Stash endpoints to public HTTPS URLs without userinfo, query, or fragment components.
+- `contracts/v1/source-snapshot.schema.json`: applies the same policy to snapshot endpoints and scene/performer URLs and remote images.
+- `contracts/v1/fixtures/`: adds invalid endpoint fixtures for credentials, query/fragment, and HTTP, plus invalid remote-reference fixtures for malformed, credential-bearing, query/fragment, and HTTP values.
+- `server/internal/domain/types.go`: centralizes public HTTPS parsing and validates content keys plus scene/performer URL/image collections.
+- `plugin/stashRecommendations/rec_plugin/contracts.py`: mirrors the Go public HTTPS policy for content keys and snapshot URL/image collections.
+- `server/internal/domain/types_test.go` and `plugin/stashRecommendations/tests/test_contracts.py`: include every new fixture in their parity tables and assert the source schema reference policy.
+
+### RED Evidence
+
+1. `go test ./server/internal/domain -run TestV1FixturesHaveCrossLanguageContractParity -v`
+
+   Output: `FAIL`; the new shared fixtures initially did not exist, then each of the seven privacy-unsafe endpoint/reference cases was accepted when fixtures were present.
+
+2. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py -k 'event_fixtures or snapshot_fixtures'`
+
+   Output: `7 failed, 13 passed`; both Python validators accepted credentials, query/fragment state, HTTP, and invalid remote-reference strings.
+
+3. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py -k source_snapshot_schema_requires`
+
+   Output: `KeyError: 'pattern'`; the source snapshot schema had no public-HTTPS constraint.
+
+### GREEN Evidence
+
+1. `go test ./server/internal/domain -v`
+
+   Output: `PASS`, including all endpoint and remote-reference invalid fixtures.
+
+2. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py`
+
+   Output: `39 passed in 0.13s`.
+
+3. `git diff --check`
+
+   Output: exit `0` with no output.
+
+### Self-Review
+
+- `ContentKey` still lowercases scheme and host, removes one trailing path slash, and retains endpoint paths such as `/graphql`; it now rejects raw credentials and incidental request state before storing a normalized endpoint.
+- Scene and performer `urls`/`remote_images` require absolute HTTPS URLs with no userinfo, query, or fragment, matching the shared schemas.
+- Both runtimes load every new shared fixture and agree on rejection.
+- No design, plan, or Task 3+ files changed.
+
+### Commit
+
+- `07f5a9d fix: restrict public contract URLs`
