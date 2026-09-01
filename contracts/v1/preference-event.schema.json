@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stash Recommendations Preference Event V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "client_id", "sequence", "occurred_at", "content_key", "kind", "origin"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "event_id": {"type": "string", "format": "uuid"},
+    "client_id": {"type": "string", "format": "uuid"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "content_key": {"$ref": "#/$defs/content_key"},
+    "kind": {"enum": ["scene.rating.set", "scene.rating.remove"]},
+    "rating": {"type": "number", "minimum": 0, "maximum": 1},
+    "origin": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "scene.rating.set"}}}, "then": {"required": ["rating"]}},
+    {"if": {"properties": {"kind": {"const": "scene.rating.remove"}}}, "then": {"not": {"required": ["rating"]}}}
+  ],
+  "$defs": {
+    "content_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "stash_id"],
+      "properties": {
+        "endpoint": {"type": "string", "format": "uri", "minLength": 1},
+        "stash_id": {"type": "string", "pattern": ".*\\S.*"}
+      }
+    }
+  }
+}
