@@ -1,0 +1,1 @@
+"""Stash recommendations plugin package."""
