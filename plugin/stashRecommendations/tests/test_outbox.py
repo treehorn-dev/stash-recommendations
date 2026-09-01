@@ -120,6 +120,23 @@ def test_outbox_status_counts_rating_play_and_o_separately_without_payload_leaka
     assert "secret" not in encoded
 
 
+def test_outbox_retry_persists_last_error_in_status(tmp_path: Path, monkeypatch: object) -> None:
+    _freeze_outbox_now(monkeypatch)
+    outbox = Outbox(tmp_path / "recommendations.sqlite3")
+    outbox.enqueue(_event("scene.played", "550e8400-e29b-41d4-a716-446655440013"))
+
+    ready = outbox.next_ready(NOW)
+
+    assert ready is not None
+
+    outbox.record_retry(ready.row_id, NOW, "stash service unavailable")
+
+    status = outbox.status()
+
+    assert status["pending"] == {"rating": 0, "play": 1, "o": 0, "snapshot": 0, "hook": 0}
+    assert status["last_error"] == "stash service unavailable"
+
+
 def test_capture_rating_task_only_queues_hook_work(tmp_path: Path, monkeypatch: object) -> None:
     _freeze_outbox_now(monkeypatch)
     output: dict[str, object] = {}

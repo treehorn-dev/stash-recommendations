@@ -152,3 +152,59 @@ git diff --check
 ```
 
 Result: clean.
+
+## Task 8 Fix Round 2
+
+Fixed the remaining Task 8 review defects by persisting the current retry
+error into `last_error` during backoff scheduling and by making
+`StashClient.find_scene()` return `None` when Stash GraphQL reports
+`findScene: null`. This keeps outbox status diagnostic state accurate without
+quarantining the row, and it removes the incidental `TypeError` on deleted or
+missing local scenes.
+
+### TDD Evidence
+
+#### RED
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest -q plugin/stashRecommendations/tests/test_outbox.py plugin/stashRecommendations/tests/test_stash_client.py
+```
+
+Result before the fix: `2 failed, 9 passed`. Failures were:
+- `Outbox.record_retry()` rejected the added `error` argument and therefore
+  could not persist retry diagnostics.
+- `StashClient.find_scene()` raised `TypeError: 'NoneType' object is not iterable`
+  when GraphQL returned `findScene: null`.
+
+#### GREEN
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest -q plugin/stashRecommendations/tests/test_outbox.py plugin/stashRecommendations/tests/test_stash_client.py
+```
+
+Result after the fix: PASS, `11 passed in 0.06s`.
+
+### Verification
+
+```bash
+make test-plugin
+```
+
+Result: PASS, `64 passed in 0.11s`.
+
+```bash
+git diff --check
+```
+
+Result: clean.
+
+### Files Changed
+
+- `plugin/stashRecommendations/rec_plugin/outbox.py`
+- `plugin/stashRecommendations/rec_plugin/stash_client.py`
+- `plugin/stashRecommendations/tests/test_outbox.py`
+- `plugin/stashRecommendations/tests/test_stash_client.py`
+
+### Concerns
+
+None.
