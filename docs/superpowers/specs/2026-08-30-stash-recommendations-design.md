@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Build a Stash plugin and operated recommendation service that collect explicit
-scene ratings, enrich catalog entries from the configured source Stash-box
-instances, and return related/local recommendations. The design supports a
-future split between the interaction system of record and the recommendation
-service.
+Build a Stash plugin and operated recommendation service that collects explicit
+scene ratings and recorded play/o engagement, enriches catalog entries from the
+configured source Stash-box instances, and returns related/local
+recommendations. The design supports a future split between the interaction
+system of record and the recommendation service.
 
 ## Scope
 
@@ -14,24 +14,25 @@ V0 includes:
 
 - A Stash plugin with a Python worker and JavaScript recommendation UI.
 - A Go HTTP service backed by PostgreSQL.
-- Explicit scene rating capture, removal, initial rating sync, durable retries,
-  and client/server idempotency.
+- Explicit scene rating capture/removal plus historical and incremental play/o
+  capture, durable retries, and client/server idempotency.
+- Immutable engagement events and two rebuildable session projections.
 - Client-proxied canonical metadata capture from configured Stash-box endpoints.
 - PostgreSQL batch-built collaborative and content-based recommendations.
 - Scene-page related recommendations and a personalized For You page.
 - Local-scene resolution by default, with an opt-in remote-only presentation.
 
-V0 excludes account registration, invitations, playback signals, o-counter
-signals, endpoint credential overrides, direct endpoint crawling by the
-service, media downloading, and ANN indexing.
+V0 excludes account registration, invitations, endpoint credential overrides,
+direct endpoint crawling by the service, media downloading, player-level
+instrumentation, and ANN indexing.
 
 ## Terms
 
 - **StashID**: Stash's external identity pair `{ endpoint, stash_id }`.
 - **Content key**: a normalized endpoint-qualified StashID.
 - **Source**: a configured Stash-box endpoint that owns canonical metadata.
-- **Account disassociation**: delete account linkage and credentials while
-  retaining de-identified interaction data for aggregate/model learning.
+- **Engagement event**: an immutable `scene.played` or `scene.o` record derived
+  from a timestamp already recorded by local Stash history.
 
 ## Architecture
 
@@ -45,9 +46,9 @@ The monorepo has three boundaries:
    server contract tests.
 
 Stash is authoritative for local scenes. Each Stash-box endpoint is
-authoritative for its public metadata. The recommendation service owns
-credentials, de-identified interactions, metadata snapshots, and derived
-recommendation projections.
+authoritative for its public metadata. The recommendation service owns account
+identity, interactions, metadata snapshots, and derived recommendation
+projections.
 
 The server is the v0 interaction system of record. Its domain code exposes
 `InteractionSource`, `RecommendationStore`, and catalog interfaces so a later
@@ -63,17 +64,13 @@ metadata; it never stores a plaintext key.
 
 The plugin is inert without an HTTPS service URL and valid API key. It uploads
 no local scene identifiers, paths, files, file hashes, local tags, custom
-fields, organization state, playback state, or local ratings beyond the
-normalized preference event.
+fields, organization state, durations, resume positions, player configuration,
+or source credentials. It uploads only normalized ratings and endpoint-qualified
+play/o event kind and UTC timestamp. Each issued API key identifies an
+independent account in v0; account registration, revocation, rotation, and
+disassociation workflows are out of scope.
 
-Account disassociation revokes all keys and removes account and credential
-linkage. Retained interaction data is de-identified for aggregate/model use.
-The policy must state that a distinctive interaction pattern can theoretically
-be linkable and that existing model outputs may retain statistical influence.
-Any future use requires a newly created account and newly issued key; key
-rotation is not disassociation.
-
-## Rating Event Protocol
+## Interaction Event Protocol
 
 Events are versioned, append-only, and idempotent:
 
@@ -101,6 +98,30 @@ and stable `event_id`; retries retain all three. The server deduplicates event
 IDs and projects the newest event per account/content key into current
 preferences.
 
+`scene.played` and `scene.o` omit `rating`. The plugin imports every recorded
+timestamp in local `play_history` and `o_history`, then incrementally imports
+new timestamps. It emits one event per external StashID with only its content
+key, UTC `occurred_at`, kind, and deterministic identity; deterministic IDs
+allow historical sync reruns without duplication. The server retains engagement
+events immutably and never derives them from player instrumentation.
+
+## Sessionization
+
+Model jobs rebuild two independent projections from an account's ordered
+engagement events. Both include repeated scenes unless the same scene occurs
+consecutively, in which case the run collapses to one session item.
+
+- **Latency sessions** start a new session only when the gap between adjacent
+  events is greater than two hours.
+- **o-bounded sessions** end immediately at every `scene.o`; the o belongs to
+  the closed session and a later play starts a new one even within two hours.
+  An o without a preceding play implies a played one-scene closed session.
+
+The projections intentionally overlap and may double count the same events.
+They provide unordered co-occurrence and ordered scene-transition candidates.
+The server configuration has an o-event weight, initially `1.5`, against a
+play-event weight of `1.0`.
+
 ## Plugin Capture and Delivery
 
 The worker listens to `Scene.Update.Post`. It performs rating work only when
@@ -108,8 +129,9 @@ The worker listens to `Scene.Update.Post`. It performs rating work only when
 from local Stash and emits a set/remove event for every external ID. The hook
 only persists local work and returns promptly.
 
-Initial rating sync is an explicit user task. It paginates all rated local
-scenes, displays a count before confirmation, and queues events using the same
+Initial rating and engagement sync are explicit user tasks. Rating sync
+paginates rated local scenes; engagement sync imports all recorded history.
+Both display counts before confirmation and queue events using the same
 contract. A local SQLite outbox persists pending events and retries with
 exponential backoff. A successful acknowledgement deletes an event.
 
@@ -150,9 +172,11 @@ The first model combines:
 
 - Item-to-item collaborative scores from overlapping, user-centered explicit
   ratings with shrinkage for small co-rating counts.
+- Session co-occurrence and ordered transition scores from both session
+  projections, weighted by event kind.
 - Content-based candidate scores from source-authoritative scene, performer,
   studio, tag, group, and compatible Stash-box attributes.
-- Per-user For You scores derived from the user's current ratings and the two
+- Per-user For You scores derived from ratings, engagement sessions, and all
   candidate sources.
 
 Insufficient data returns an empty state. V0 has no global popularity fallback.
@@ -184,14 +208,15 @@ default and remote-only option.
 
 ## Verification
 
-Plugin tests cover rating normalization/removal, all-ID fan-out, hook filtering,
-initial-sync pagination, source selection, snapshot mapping, source rate
-limits, outbox retry/quarantine, and local/remote result resolution.
+Plugin tests cover rating normalization/removal, all-ID fan-out, history import,
+incremental play/o sync, session-event privacy, source selection, snapshot
+mapping, source rate limits, outbox retry/quarantine, and local/remote result
+resolution.
 
-Server tests cover API-key hashing/authentication, idempotent event ingestion,
-event ordering, current-preference projection, source snapshot UPSERTs,
-disassociation, batch version activation/rollback, ranking fixtures, and
-empty-state behavior.
+Server tests cover API-key hashing/authentication, idempotent interaction
+ingestion, event ordering, current-preference projection, immutable engagement
+storage, both session boundary algorithms, source snapshot UPSERTs, batch
+version activation/rollback, ranking fixtures, and empty-state behavior.
 
 Shared contract tests validate fixed JSON event and Stash-box-schema snapshot
 fixtures against both client serialization and server validation. End-to-end
@@ -200,9 +225,7 @@ source proxying, delivery, and UI resolution work together.
 
 ## Future Extensions
 
-Playback and o-counter capture are deferred. The event namespace reserves
-typed engagement events for later explicit design, including consent,
-completion thresholds, autoplay/preview filtering, deduplication, and
-retention. Account registration and invitation flows, endpoint credential
-overrides, scheduled metadata sync, and ANN candidate generation are likewise
-future work.
+Account registration and invitation flows, account revocation/rotation and
+disassociation, endpoint credential overrides, scheduled metadata sync,
+player-level instrumentation (completion thresholds and autoplay/preview
+filtering), and ANN candidate generation are future work.
