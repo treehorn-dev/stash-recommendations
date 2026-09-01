@@ -252,3 +252,47 @@
 ### Commit
 
 - `07f5a9d fix: restrict public contract URLs`
+
+## Fix Round 5: URL Case and Empty Delimiter Parity
+
+### Changed Paths
+
+- `contracts/v1/preference-event.schema.json` and `contracts/v1/source-snapshot.schema.json`: accept any ASCII case for the HTTPS scheme, consistent with runtime normalization, while retaining public-reference exclusions.
+- `contracts/v1/fixtures/`: adds one uppercase HTTPS endpoint fixture and invalid endpoint/reference fixtures containing bare `?` and `#` delimiters.
+- `server/internal/domain/types.go` and `plugin/stashRecommendations/rec_plugin/contracts.py`: reject raw query/fragment delimiters even when their parsed value is empty.
+- `server/internal/domain/types_test.go` and `plugin/stashRecommendations/tests/test_contracts.py`: load every new fixture and verify uppercase endpoint normalization to `https://box.example/GRAPHQL`.
+
+### RED Evidence
+
+1. `go test ./server/internal/domain -run 'Test(V1FixturesHaveCrossLanguageContractParity|UppercaseEndpointFixtureNormalizes)' -v`
+
+   Output: initially failed for the absent fixtures; with the fixtures present, the four empty-query/empty-fragment endpoint and remote-reference cases were incorrectly accepted.
+
+2. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py -k 'schema or fixtures or uppercase'`
+
+   Output: schema assertions failed because patterns required lowercase `https`; four empty delimiter fixtures were also incorrectly accepted.
+
+### GREEN Evidence
+
+1. `go test ./server/internal/domain -v`
+
+   Output: `PASS`, including uppercase normalization and all raw-delimiter fixtures.
+
+2. `PYTHONPATH=plugin/stashRecommendations /opt/homebrew/bin/pytest -q plugin/stashRecommendations/tests/test_contracts.py`
+
+   Output: `45 passed in 0.08s`.
+
+3. `git diff --check`
+
+   Output: exit `0` with no output.
+
+### Self-Review
+
+- Schema HTTPS matching uses explicit ASCII character classes rather than unsupported regex flags, so uppercase scheme inputs remain schema-valid and normalize at runtime.
+- Both runtimes reject literal `?` and `#` before accepting parsed URL components, covering bare delimiters as well as populated query and fragment values.
+- The same parser validates content endpoints and scene/performer public references.
+- No plan, design, or Task 3+ files changed.
+
+### Commit
+
+- `e040ebe fix: align URL delimiter contract parity`
