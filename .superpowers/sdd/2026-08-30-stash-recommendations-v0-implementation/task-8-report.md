@@ -72,3 +72,55 @@ Result: clean.
 
 Independent review has not been performed. This report stops at the Task 8
 implementer checkpoint, with Task 9 and Task 10 untouched.
+
+## Task 8 Fix Round 1
+
+Fixed the durable outbox identity defect by switching all outbox mutation
+paths to the SQLite row primary key instead of nullable protocol `event_id`.
+`OutboxItem` now carries `row_id`, `next_ready()` returns the row id, and
+`ack` / `record_retry` / `quarantine` target `id` directly. Protocol
+`event_id` remains preserved on preference events for idempotency, but it is no
+longer the universal mutation key. No new SQLite migration file was needed:
+the table already had a durable `id INTEGER PRIMARY KEY AUTOINCREMENT`
+column, so the fix was an API and query change only.
+
+### TDD Evidence
+
+#### RED
+
+```bash
+PYTHONPATH=plugin/stashRecommendations /private/tmp/stashrec-pytest-venv/bin/python -m pytest plugin/stashRecommendations/tests/test_outbox.py -q
+```
+
+Result before the fix: `3 failed` initially because the tests exercised the
+broken `event_id` path; after freezing the outbox clock the remaining failure
+was the nullable-`event_id` mutation bug.
+
+#### GREEN
+
+```bash
+PYTHONPATH=plugin/stashRecommendations /private/tmp/stashrec-pytest-venv/bin/python -m pytest plugin/stashRecommendations/tests/test_outbox.py -q
+```
+
+Result after the fix: `5 passed in 0.06s`.
+
+```bash
+PYTHONPATH=plugin/stashRecommendations /private/tmp/stashrec-pytest-venv/bin/pytest plugin/stashRecommendations/tests -q
+```
+
+Result: `62 passed in 0.12s`.
+
+```bash
+git diff --check
+```
+
+Result: clean.
+
+### Files Changed
+
+- `plugin/stashRecommendations/rec_plugin/outbox.py`
+- `plugin/stashRecommendations/tests/test_outbox.py`
+
+### Concerns
+
+None.

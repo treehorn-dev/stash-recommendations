@@ -16,6 +16,7 @@ STATE_QUARANTINED = "quarantined"
 
 @dataclass
 class OutboxItem:
+    row_id: int
     item_type: str
     metric: str
     payload: dict[str, Any]
@@ -58,7 +59,7 @@ class Outbox:
     def next_ready(self, now: datetime) -> OutboxItem | None:
         row = self._fetchone(
             """
-            SELECT event_id, item_type, metric, payload_json
+            SELECT id, event_id, item_type, metric, payload_json
             FROM outbox
             WHERE state = ? AND next_attempt_at <= ?
             ORDER BY id ASC
@@ -69,17 +70,18 @@ class Outbox:
         if row is None:
             return None
         return OutboxItem(
-            event_id=row[0],
-            item_type=row[1],
-            metric=row[2],
-            payload=json.loads(row[3]),
+            row_id=row[0],
+            event_id=row[1],
+            item_type=row[2],
+            metric=row[3],
+            payload=json.loads(row[4]),
         )
 
-    def ack(self, event_id: str) -> None:
+    def ack(self, row_id: int) -> None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT metric FROM outbox WHERE event_id = ?",
-                (event_id,),
+                "SELECT metric FROM outbox WHERE id = ?",
+                (row_id,),
             ).fetchone()
             if row is None:
                 return
@@ -91,13 +93,13 @@ class Outbox:
                 """,
                 (row[0],),
             )
-            connection.execute("DELETE FROM outbox WHERE event_id = ?", (event_id,))
+            connection.execute("DELETE FROM outbox WHERE id = ?", (row_id,))
 
-    def record_retry(self, event_id: str, now: datetime) -> None:
+    def record_retry(self, row_id: int, now: datetime) -> None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT attempt_count FROM outbox WHERE event_id = ?",
-                (event_id,),
+                "SELECT attempt_count FROM outbox WHERE id = ?",
+                (row_id,),
             ).fetchone()
             if row is None:
                 return
@@ -107,25 +109,25 @@ class Outbox:
                 """
                 UPDATE outbox
                 SET attempt_count = ?, next_attempt_at = ?, updated_at = ?
-                WHERE event_id = ?
+                WHERE id = ?
                 """,
                 (
                     attempt_count,
                     _isoformat(now + timedelta(seconds=delay_seconds)),
                     _isoformat(now),
-                    event_id,
+                    row_id,
                 ),
             )
 
-    def quarantine(self, event_id: str, error: str) -> None:
+    def quarantine(self, row_id: int, error: str) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 UPDATE outbox
                 SET state = ?, last_error = ?, updated_at = ?
-                WHERE event_id = ?
+                WHERE id = ?
                 """,
-                (STATE_QUARANTINED, error, _isoformat(_utcnow()), event_id),
+                (STATE_QUARANTINED, error, _isoformat(_utcnow()), row_id),
             )
 
     def status(self) -> dict[str, Any]:
