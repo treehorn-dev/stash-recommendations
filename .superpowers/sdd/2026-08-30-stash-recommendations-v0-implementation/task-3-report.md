@@ -20,6 +20,28 @@ Final verification:
 - `node --test tests/ui/*.test.js`: PASS, `1` test.
 - `git diff --check`: clean.
 
+## Fix Round 2
+
+Migrations now use a transaction-scoped advisory lock plus ordered
+`schema_migrations` tracking. `001_initial` retains the original legacy
+`api_keys` shape; additive `002_api_key_identifier` adds `key_id`, backfills
+legacy rows deterministically from their API-key UUIDs, enforces non-null, and
+creates a unique index. Fresh databases apply both versions in order.
+
+TDD evidence:
+
+- RED: an isolated-schema regression seeded the old `api_keys` table without
+  `key_id`; the old runner completed but `CreateAccount` failed with `column
+  "key_id" of relation "api_keys" does not exist`.
+- GREEN: the migration now records `001_initial` then
+  `002_api_key_identifier`, backfills the seeded legacy row, and creates and
+  authenticates a new account key.
+
+Final verification:
+
+- `POSTGRES_TEST_DSN=postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable go test ./server/... -v`: PASS.
+- `git diff --check`: clean.
+
 The plan's `make test-server` target is absent from the bootstrap Makefile;
 the equivalent full server command above was run directly.
 
