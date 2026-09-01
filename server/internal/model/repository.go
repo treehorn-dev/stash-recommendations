@@ -1,0 +1,328 @@
+package model
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/treehorn/stash-recommendations/server/internal/domain"
+)
+
+type Repository struct {
+	pool *pgxpool.Pool
+}
+
+func NewRepository(pool *pgxpool.Pool) *Repository {
+	return &Repository{pool: pool}
+}
+
+func (repository *Repository) CurrentRatings(ctx context.Context) ([]Rating, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT account_id, endpoint, stash_id, rating
+		FROM current_preferences
+		ORDER BY account_id, endpoint, stash_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query current ratings: %w", err)
+	}
+	defer rows.Close()
+
+	var ratings []Rating
+	for rows.Next() {
+		var rating Rating
+		if err := rows.Scan(&rating.AccountID, &rating.ContentKey.Endpoint, &rating.ContentKey.StashID, &rating.Value); err != nil {
+			return nil, fmt.Errorf("scan current rating: %w", err)
+		}
+		ratings = append(ratings, rating)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate current ratings: %w", err)
+	}
+	return ratings, nil
+}
+
+func (repository *Repository) CurrentSessions(ctx context.Context) ([]Session, error) {
+	rows, err := repository.pool.Query(ctx, `
+		WITH latest AS (
+			SELECT account_id, projection_type, MAX(projection_version) AS projection_version
+			FROM session_projections
+			GROUP BY account_id, projection_type
+		)
+		SELECT
+			items.account_id,
+			items.projection_type,
+			items.session_order,
+			items.item_order,
+			items.endpoint,
+			items.stash_id,
+			items.kind
+		FROM session_projection_items AS items
+		JOIN latest
+			ON latest.account_id = items.account_id
+			AND latest.projection_type = items.projection_type
+			AND latest.projection_version = items.projection_version
+		ORDER BY items.account_id, items.projection_type, items.session_order, items.item_order
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query current sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var (
+		sessions    []Session
+		lastAccount string
+		lastType    string
+		lastOrder   int
+	)
+	for rows.Next() {
+		var (
+			accountID, projectionType, endpoint, stashID, kind string
+			sessionOrder, itemOrder                            int
+		)
+		if err := rows.Scan(&accountID, &projectionType, &sessionOrder, &itemOrder, &endpoint, &stashID, &kind); err != nil {
+			return nil, fmt.Errorf("scan current session item: %w", err)
+		}
+		if len(sessions) == 0 || accountID != lastAccount || projectionType != lastType || sessionOrder != lastOrder {
+			sessions = append(sessions, Session{AccountID: accountID, ProjectionType: projectionType})
+			lastAccount, lastType, lastOrder = accountID, projectionType, sessionOrder
+		}
+		sessions[len(sessions)-1].Items = append(sessions[len(sessions)-1].Items, SessionItem{
+			ContentKey: domain.ContentKey{Endpoint: endpoint, StashID: stashID},
+			Kind:       kind,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate current sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+func (repository *Repository) CatalogCandidates(ctx context.Context) ([]CatalogCandidate, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT source_endpoint, source_stash_id, candidate_endpoint, candidate_stash_id, reason
+		FROM (
+			SELECT left_scene.scene_endpoint AS source_endpoint, left_scene.scene_stash_id AS source_stash_id,
+				right_scene.scene_endpoint AS candidate_endpoint, right_scene.scene_stash_id AS candidate_stash_id,
+				'shared_performer' AS reason
+			FROM source_scene_performers AS left_scene
+			JOIN source_scene_performers AS right_scene
+				ON right_scene.performer_endpoint = left_scene.performer_endpoint
+				AND right_scene.performer_stash_id = left_scene.performer_stash_id
+				AND (right_scene.scene_endpoint, right_scene.scene_stash_id) <> (left_scene.scene_endpoint, left_scene.scene_stash_id)
+			UNION ALL
+			SELECT left_scene.scene_endpoint, left_scene.scene_stash_id,
+				right_scene.scene_endpoint, right_scene.scene_stash_id, 'shared_tag'
+			FROM source_scene_tags AS left_scene
+			JOIN source_scene_tags AS right_scene
+				ON right_scene.tag_endpoint = left_scene.tag_endpoint
+				AND right_scene.tag_stash_id = left_scene.tag_stash_id
+				AND (right_scene.scene_endpoint, right_scene.scene_stash_id) <> (left_scene.scene_endpoint, left_scene.scene_stash_id)
+			UNION ALL
+			SELECT left_scene.endpoint, left_scene.stash_id, right_scene.endpoint, right_scene.stash_id, 'shared_studio'
+			FROM source_scenes AS left_scene
+			JOIN source_scenes AS right_scene
+				ON right_scene.studio_endpoint = left_scene.studio_endpoint
+				AND right_scene.studio_stash_id = left_scene.studio_stash_id
+				AND (right_scene.endpoint, right_scene.stash_id) <> (left_scene.endpoint, left_scene.stash_id)
+			WHERE left_scene.studio_endpoint IS NOT NULL AND left_scene.studio_stash_id IS NOT NULL
+			UNION ALL
+			SELECT left_scene.endpoint, left_scene.stash_id, right_scene.endpoint, right_scene.stash_id, 'shared_director'
+			FROM source_scenes AS left_scene
+			JOIN source_scenes AS right_scene
+				ON right_scene.director = left_scene.director
+				AND (right_scene.endpoint, right_scene.stash_id) <> (left_scene.endpoint, left_scene.stash_id)
+			WHERE NULLIF(BTRIM(left_scene.director), '') IS NOT NULL
+		) AS candidates
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query catalog candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var candidates []CatalogCandidate
+	for rows.Next() {
+		var candidate CatalogCandidate
+		if err := rows.Scan(
+			&candidate.Source.Endpoint,
+			&candidate.Source.StashID,
+			&candidate.Candidate.Endpoint,
+			&candidate.Candidate.StashID,
+			&candidate.Reason,
+		); err != nil {
+			return nil, fmt.Errorf("scan catalog candidate: %w", err)
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate catalog candidates: %w", err)
+	}
+	return candidates, nil
+}
+
+func (repository *Repository) SaveAndActivate(ctx context.Context, projection Projection) (string, error) {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return "", fmt.Errorf("begin recommendation transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(81102535415121123)); err != nil {
+		return "", fmt.Errorf("lock recommendation build: %w", err)
+	}
+
+	var versionID string
+	if err := tx.QueryRow(ctx, `INSERT INTO model_versions (active) VALUES (false) RETURNING id`).Scan(&versionID); err != nil {
+		return "", fmt.Errorf("create inactive model version: %w", err)
+	}
+	for _, neighbor := range projection.Neighbors {
+		reasons, err := json.Marshal(neighbor.Reasons)
+		if err != nil {
+			return "", fmt.Errorf("encode neighbor reasons: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO item_neighbors (
+				model_version_id, source_endpoint, source_stash_id,
+				neighbor_endpoint, neighbor_stash_id, score, reasons
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, versionID, neighbor.Source.Endpoint, neighbor.Source.StashID, neighbor.Candidate.Endpoint, neighbor.Candidate.StashID, neighbor.Score, reasons); err != nil {
+			return "", fmt.Errorf("insert item neighbor: %w", err)
+		}
+	}
+	for _, recommendation := range projection.UserRecommendations {
+		reasons, err := json.Marshal(recommendation.Reasons)
+		if err != nil {
+			return "", fmt.Errorf("encode user recommendation reasons: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO user_recommendations (
+				model_version_id, account_id, source_endpoint, source_stash_id, score, reasons
+			) VALUES ($1, $2, $3, $4, $5, $6)
+		`, versionID, recommendation.AccountID, recommendation.ContentKey.Endpoint, recommendation.ContentKey.StashID, recommendation.Score, reasons); err != nil {
+			return "", fmt.Errorf("insert user recommendation: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE model_versions SET active = false WHERE active`); err != nil {
+		return "", fmt.Errorf("deactivate prior model version: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE model_versions SET active = true, activated_at = now() WHERE id = $1`, versionID); err != nil {
+		return "", fmt.Errorf("activate model version: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit recommendation projection: %w", err)
+	}
+	return versionID, nil
+}
+
+func (repository *Repository) Related(ctx context.Context, source domain.ContentKey, limit int) ([]Recommendation, string, error) {
+	version, found, err := repository.activeVersion(ctx)
+	if err != nil || !found {
+		return nil, version, err
+	}
+	return repository.readRecommendations(ctx, `
+		SELECT neighbor_endpoint, neighbor_stash_id, score, reasons
+		FROM item_neighbors
+		WHERE model_version_id = $1 AND source_endpoint = $2 AND source_stash_id = $3
+		ORDER BY score DESC, neighbor_endpoint, neighbor_stash_id
+		LIMIT $4
+	`, version, source.Endpoint, source.StashID, normalizeLimit(limit))
+}
+
+func (repository *Repository) ForYou(ctx context.Context, accountID string, limit int) ([]Recommendation, string, error) {
+	version, found, err := repository.activeVersion(ctx)
+	if err != nil || !found {
+		return nil, version, err
+	}
+	return repository.readRecommendations(ctx, `
+		SELECT source_endpoint, source_stash_id, score, reasons
+		FROM user_recommendations
+		WHERE model_version_id = $1 AND account_id = $2
+		ORDER BY score DESC, source_endpoint, source_stash_id
+		LIMIT $3
+	`, version, accountID, normalizeLimit(limit))
+}
+
+func (repository *Repository) activeVersion(ctx context.Context) (string, bool, error) {
+	var version string
+	err := repository.pool.QueryRow(ctx, `SELECT id FROM model_versions WHERE active`).Scan(&version)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("query active model version: %w", err)
+	}
+	return version, true, nil
+}
+
+func (repository *Repository) readRecommendations(ctx context.Context, query string, arguments ...any) ([]Recommendation, string, error) {
+	rows, err := repository.pool.Query(ctx, query, arguments...)
+	if err != nil {
+		return nil, "", fmt.Errorf("query recommendations: %w", err)
+	}
+	defer rows.Close()
+
+	// The selected content key is the first two columns. Canonical URLs are
+	// fetched separately so absent catalog metadata remains a valid result.
+	var raw []struct {
+		key     domain.ContentKey
+		score   float64
+		reasons []byte
+	}
+	for rows.Next() {
+		var row struct {
+			key     domain.ContentKey
+			score   float64
+			reasons []byte
+		}
+		if err := rows.Scan(&row.key.Endpoint, &row.key.StashID, &row.score, &row.reasons); err != nil {
+			return nil, "", fmt.Errorf("scan recommendation: %w", err)
+		}
+		raw = append(raw, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("iterate recommendations: %w", err)
+	}
+
+	version := fmt.Sprint(arguments[0])
+	items := make([]Recommendation, 0, len(raw))
+	for _, row := range raw {
+		var reasons []string
+		if err := json.Unmarshal(row.reasons, &reasons); err != nil {
+			return nil, "", fmt.Errorf("decode recommendation reasons: %w", err)
+		}
+		canonicalURL, err := repository.canonicalURL(ctx, row.key)
+		if err != nil {
+			return nil, "", err
+		}
+		items = append(items, Recommendation{ContentKey: row.key, Score: row.score, Reasons: reasons, ModelVersion: version, CanonicalURL: canonicalURL})
+	}
+	return items, version, nil
+}
+
+func (repository *Repository) canonicalURL(ctx context.Context, key domain.ContentKey) (*string, error) {
+	var template *string
+	err := repository.pool.QueryRow(ctx, `SELECT canonical_scene_url_template FROM source_configs WHERE endpoint = $1`, key.Endpoint).Scan(&template)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query canonical URL: %w", err)
+	}
+	if template == nil || strings.TrimSpace(*template) == "" {
+		return nil, nil
+	}
+	value := strings.ReplaceAll(*template, "{stash_id}", key.StashID)
+	value = strings.ReplaceAll(value, "{id}", key.StashID)
+	return &value, nil
+}
+
+func normalizeLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	return int(math.Min(float64(limit), 100))
+}

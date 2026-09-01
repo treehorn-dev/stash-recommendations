@@ -9,6 +9,7 @@ import (
 	"github.com/treehorn/stash-recommendations/server/internal/config"
 	"github.com/treehorn/stash-recommendations/server/internal/httpapi"
 	"github.com/treehorn/stash-recommendations/server/internal/ingest"
+	"github.com/treehorn/stash-recommendations/server/internal/model"
 	"github.com/treehorn/stash-recommendations/server/internal/store"
 )
 
@@ -27,11 +28,18 @@ func main() {
 	if err := repository.Migrate(ctx); err != nil {
 		log.Fatal(err)
 	}
+	modelRepository := model.NewRepository(repository.Pool())
+	if cfg.BuildModelOnStart {
+		if _, err := model.NewBuilder(modelRepository, cfg.ModelOWeight).BuildAndActivate(ctx); err != nil {
+			log.Printf("recommendation model build failed; retaining the prior active version: %v", err)
+		}
+	}
 
 	handler := httpapi.NewMux(httpapi.Dependencies{
-		AccountRepository:  repository,
-		InteractionService: ingest.NewInteractionService(repository),
-		SnapshotService:    catalog.NewSnapshotService(repository),
+		AccountRepository:    repository,
+		InteractionService:   ingest.NewInteractionService(repository),
+		SnapshotService:      catalog.NewSnapshotService(repository),
+		RecommendationReader: modelRepository,
 	})
 	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
 		log.Fatal(err)

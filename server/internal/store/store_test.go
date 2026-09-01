@@ -111,7 +111,7 @@ func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes"}, versions)
 }
 
 func TestMigrateAddsSessionProjectionTablesToExistingStore(t *testing.T) {
@@ -144,7 +144,7 @@ func TestMigrateAddsSessionProjectionTablesToExistingStore(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes"}, versions)
 }
 
 func TestMigrateAddsSourceCatalogProjectionColumnsToExistingStore(t *testing.T) {
@@ -201,7 +201,7 @@ func TestMigrateAddsSourceCatalogProjectionColumnsToExistingStore(t *testing.T) 
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes"}, versions)
 }
 
 func openIsolatedMigrationStore(t *testing.T) *Store {
