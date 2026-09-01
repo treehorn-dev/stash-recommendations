@@ -15,7 +15,7 @@ type Recommendation struct {
 	Score        float64           `json:"score"`
 	Reasons      []string          `json:"reasons"`
 	ModelVersion string            `json:"model_version"`
-	CanonicalURL *string           `json:"canonical_url,omitempty"`
+	CanonicalURL *string           `json:"canonical_url"`
 }
 
 type Rating struct {
@@ -50,6 +50,7 @@ type InteractionSource interface {
 // CatalogSource supplies candidates derived from validated catalog projections.
 type CatalogSource interface {
 	CatalogCandidates(context.Context) ([]CatalogCandidate, error)
+	CatalogedScenes(context.Context) ([]domain.ContentKey, error)
 }
 
 // RecommendationStore atomically persists an inactive projection and activates it only when complete.

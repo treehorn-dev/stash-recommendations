@@ -27,8 +27,11 @@ func TestRecommendationReadsAuthenticateAndReturnVersionReasonsAndCanonicalURL(t
 	require.NoError(t, err)
 	seedAPIModelRating(t, pool, account.ID, "scene-a", 1)
 	seedAPIModelRating(t, pool, account.ID, "scene-b", 1)
+	seedAPIModelRating(t, pool, account.ID, "scene-c", 0)
 	seedAPIModelRating(t, pool, otherAccount.ID, "scene-a", 1)
 	seedAPIModelRating(t, pool, otherAccount.ID, "scene-b", 1)
+	seedAPIModelRating(t, pool, otherAccount.ID, "scene-c", 0)
+	seedAPIModelCatalogedScenes(t, pool, "scene-a", "scene-b")
 	_, err = pool.Exec(ctx, `
 		INSERT INTO source_configs (endpoint, canonical_scene_url_template)
 		VALUES ($1, 'https://box.example/scenes/{stash_id}')
@@ -75,8 +78,11 @@ func TestRecommendationReadsReturnEmptyColdStartAndOmitCanonicalURL(t *testing.T
 	require.NoError(t, err)
 	seedAPIModelRating(t, pool, account.ID, "scene-a", 1)
 	seedAPIModelRating(t, pool, account.ID, "scene-b", 1)
+	seedAPIModelRating(t, pool, account.ID, "scene-c", 0)
 	seedAPIModelRating(t, pool, otherAccount.ID, "scene-a", 1)
 	seedAPIModelRating(t, pool, otherAccount.ID, "scene-b", 1)
+	seedAPIModelRating(t, pool, otherAccount.ID, "scene-c", 0)
+	seedAPIModelCatalogedScenes(t, pool, "scene-a", "scene-b")
 	_, err = model.NewBuilder(modelRepository, model.DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
 
@@ -84,6 +90,15 @@ func TestRecommendationReadsReturnEmptyColdStartAndOmitCanonicalURL(t *testing.T
 	related := recommendationResponse(t, handler, "/v1/recommendations/related?"+query.Encode(), account.PlaintextKey)
 	require.Len(t, related.Items, 1)
 	require.Nil(t, related.Items[0].CanonicalURL)
+	request := httptest.NewRequest(http.MethodGet, "/v1/recommendations/related?"+query.Encode(), nil)
+	request.Header.Set("Authorization", "Bearer "+account.PlaintextKey)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	var body struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	require.Equal(t, json.RawMessage("null"), body.Items[0]["canonical_url"])
 }
 
 type recommendationAPIResponse struct {
@@ -142,6 +157,14 @@ func seedAPIModelRating(t *testing.T, pool *pgxpool.Pool, accountID, stashID str
 		VALUES ($1, $2, $3, $4, '550e8400-e29b-41d4-a716-446655440001', 1, now())
 	`, accountID, apiModelEndpoint, stashID, rating)
 	require.NoError(t, err)
+}
+
+func seedAPIModelCatalogedScenes(t *testing.T, pool *pgxpool.Pool, stashIDs ...string) {
+	t.Helper()
+	for _, stashID := range stashIDs {
+		_, err := pool.Exec(context.Background(), `INSERT INTO source_scenes (endpoint, stash_id) VALUES ($1, $2)`, apiModelEndpoint, stashID)
+		require.NoError(t, err)
+	}
 }
 
 const apiModelEndpoint = "https://box.example/graphql"

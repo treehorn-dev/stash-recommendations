@@ -137,6 +137,29 @@ func (repository *Repository) CatalogCandidates(ctx context.Context) ([]CatalogC
 				ON right_scene.director = left_scene.director
 				AND (right_scene.endpoint, right_scene.stash_id) <> (left_scene.endpoint, left_scene.stash_id)
 			WHERE NULLIF(BTRIM(left_scene.director), '') IS NOT NULL
+			UNION ALL
+			SELECT left_scene.endpoint, left_scene.stash_id, right_scene.endpoint, right_scene.stash_id, 'shared_code'
+			FROM source_scenes AS left_scene JOIN source_scenes AS right_scene
+				ON lower(BTRIM(right_scene.code)) = lower(BTRIM(left_scene.code))
+				AND (right_scene.endpoint, right_scene.stash_id) <> (left_scene.endpoint, left_scene.stash_id)
+			WHERE NULLIF(BTRIM(left_scene.code), '') IS NOT NULL
+			UNION ALL
+			SELECT left_scene.endpoint, left_scene.stash_id, right_scene.endpoint, right_scene.stash_id, 'shared_title'
+			FROM source_scenes AS left_scene JOIN source_scenes AS right_scene
+				ON lower(BTRIM(right_scene.title)) = lower(BTRIM(left_scene.title))
+				AND (right_scene.endpoint, right_scene.stash_id) <> (left_scene.endpoint, left_scene.stash_id)
+			WHERE NULLIF(BTRIM(left_scene.title), '') IS NOT NULL
+			UNION ALL
+			SELECT left_scene.endpoint, left_scene.stash_id, right_scene.endpoint, right_scene.stash_id, 'shared_date'
+			FROM source_scenes AS left_scene JOIN source_scenes AS right_scene
+				ON (right_scene.endpoint, right_scene.stash_id) <> (left_scene.endpoint, left_scene.stash_id)
+				AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(left_scene.dates) AS left_date JOIN jsonb_array_elements_text(right_scene.dates) AS right_date ON right_date = left_date)
+			UNION ALL
+			SELECT left_scene.endpoint, left_scene.stash_id, right_scene.endpoint, right_scene.stash_id, 'similar_duration'
+			FROM source_scenes AS left_scene JOIN source_scenes AS right_scene
+				ON (right_scene.endpoint, right_scene.stash_id) <> (left_scene.endpoint, left_scene.stash_id)
+				AND left_scene.duration IS NOT NULL AND right_scene.duration IS NOT NULL
+				AND ABS(right_scene.duration - left_scene.duration) <= GREATEST(60, left_scene.duration / 10)
 		) AS candidates
 	`)
 	if err != nil {
@@ -162,6 +185,26 @@ func (repository *Repository) CatalogCandidates(ctx context.Context) ([]CatalogC
 		return nil, fmt.Errorf("iterate catalog candidates: %w", err)
 	}
 	return candidates, nil
+}
+
+func (repository *Repository) CatalogedScenes(ctx context.Context) ([]domain.ContentKey, error) {
+	rows, err := repository.pool.Query(ctx, `SELECT endpoint, stash_id FROM source_scenes ORDER BY endpoint, stash_id`)
+	if err != nil {
+		return nil, fmt.Errorf("query cataloged scenes: %w", err)
+	}
+	defer rows.Close()
+	var scenes []domain.ContentKey
+	for rows.Next() {
+		var scene domain.ContentKey
+		if err := rows.Scan(&scene.Endpoint, &scene.StashID); err != nil {
+			return nil, fmt.Errorf("scan cataloged scene: %w", err)
+		}
+		scenes = append(scenes, scene)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cataloged scenes: %w", err)
+	}
+	return scenes, nil
 }
 
 func (repository *Repository) SaveAndActivate(ctx context.Context, projection Projection) (string, error) {
