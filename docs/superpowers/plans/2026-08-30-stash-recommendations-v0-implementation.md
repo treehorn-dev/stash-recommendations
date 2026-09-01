@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
 
-**Goal:** Build a Stash plugin and Go/PostgreSQL service that ingest explicit ratings, client-proxy source Stash-box metadata, and surface related and For You recommendations.
+**Goal:** Build a Stash plugin and Go/PostgreSQL service that ingest explicit ratings plus recorded play/o engagement, client-proxy source Stash-box metadata, and surface related and For You recommendations.
 
 **Architecture:** A Python raw-task Stash plugin handles hooks, sync, source queries, and a SQLite outbox. A Go HTTP server persists events, Stash-box-schema snapshots, and versioned recommendation projections in PostgreSQL. Domain interfaces isolate future interaction-system and ANN changes.
 
@@ -14,10 +14,13 @@
 
 - A content key is exactly { endpoint, stash_id }. Normalize endpoint scheme/host casing and one trailing slash while retaining /graphql.
 - Fan each explicit local rating100 to all local stash_ids. Send rating100 / 100 in [0,1]. Clearing sends scene.rating.remove without rating.
-- Never upload local titles, tags, paths, files, hashes, custom fields, organization, playback, o-counter, or source credentials.
+- Import every recorded local `play_history` and `o_history` timestamp initially, then only newly observed timestamps. Send one endpoint-qualified `scene.played` or `scene.o` event per external ID; no local IDs, duration, resume, file, or player fields.
+- Engagement event IDs are deterministic for client/kind/content/timestamp so historical sync is idempotent; ratings retain persistent client sequence ordering.
+- Rebuild both overlapping session projections: latency breaks only after a gap greater than two hours; o-bounded closes at each o, with an orphan o implying a played one-scene session. Collapse only consecutive repeats.
+- Never upload local titles, tags, paths, files, hashes, custom fields, organization, source credentials, or any local metadata beyond normalized ratings and event kind/timestamp.
 - Query source metadata only from the plugin through authenticated configured Stash-box endpoints. Upload only Stash-box-schema snapshots and remote URL/image references.
 - Hooks enqueue SQLite work only. Delivery and source fetches are task-driven and independent.
-- Store server API keys only as Argon2id hashes. Registration/invites, credential overrides, playback/o capture, scheduled source sync, media proxying, and ANN indexing are out of scope.
+- Store server API keys only as Argon2id hashes. Each key identifies an independent v0 account. Registration/invites, account revocation/rotation/disassociation, credential overrides, player instrumentation, scheduled source sync, media proxying, and ANN indexing are out of scope.
 - UI defaults to locally resolvable scenes. Remote-only links require the enabled setting and a returned canonical URL.
 - Use TDD in every task. Stop at review checkpoints.
 
@@ -113,6 +116,8 @@ git commit -m "chore: bootstrap stash recommendations monorepo"
 - Create: contracts/v1/fixtures/preference-event-valid.json
 - Create: contracts/v1/fixtures/preference-event-remove-valid.json
 - Create: contracts/v1/fixtures/preference-event-invalid-rating.json
+- Create: contracts/v1/fixtures/engagement-event-valid.json
+- Create: contracts/v1/fixtures/engagement-event-invalid.json
 - Create: contracts/v1/fixtures/source-snapshot-valid.json
 - Create: server/internal/domain/types.go
 - Create: server/internal/domain/types_test.go
@@ -150,7 +155,15 @@ Expected: FAIL because domain types do not exist.
 
 - [ ] **Step 3: Implement strict schemas and types**
 
-Use schemas with additionalProperties false. Require v1 UUID event/client IDs, sequence >= 1, RFC3339 time, valid content key, and kinds scene.rating.set/remove. Set requires rating [0,1]; remove prohibits rating. Snapshot records include Stash-box scene/performer/studio/tag/relationship fields only. Reject paths, files, rating100, play_count, and custom_fields.
+Use schemas with additionalProperties false. Require v1 UUID event/client IDs,
+sequence >= 1, RFC3339 time, and a valid content key. Support
+scene.rating.set/remove and scene.played/o. Set requires rating [0,1]; remove
+and engagement kinds prohibit rating. Engagement events contain only kind,
+occurred_at, and endpoint-qualified content beyond envelope identity fields.
+Require strict JSON scalar and nested types consistently in Go and Python;
+booleans are never numbers. Snapshot records include Stash-box
+scene/performer/studio/tag/relationship fields only. Reject paths, files,
+rating100, play_count, and custom_fields.
 
 - [ ] **Step 4: Verify contract tests**
 
@@ -165,7 +178,7 @@ git add contracts server/internal/domain plugin/stashRecommendations/rec_plugin/
 git commit -m "feat: define versioned recommendation contracts"
 ~~~
 
-### Task 3: Add PostgreSQL Identity, Storage, and Disassociation
+### Task 3: Add PostgreSQL Identity and Base Storage
 
 **Files:**
 - Create: server/internal/store/migrations/001_initial.sql
@@ -174,33 +187,32 @@ git commit -m "feat: define versioned recommendation contracts"
 - Create: server/internal/auth/keys.go
 - Create: server/internal/auth/keys_test.go
 - Create: server/internal/httpapi/auth.go
-- Create: server/internal/httpapi/disassociate.go
-- Create: server/internal/httpapi/disassociate_test.go
 
-**Interfaces:** auth.HashAPIKey(string) and VerifyAPIKey(hash, plaintext); store.AccountRepository.Authenticate; POST /v1/account/disassociate returns 204.
+**Interfaces:** auth.HashAPIKey(string) and VerifyAPIKey(hash, plaintext); store.AccountRepository.Authenticate.
 
-- [ ] **Step 1: Write the failing disassociation integration test**
+- [ ] **Step 1: Write the failing API-key authentication integration test**
 
 ~~~go
-func TestDisassociateRevokesKeysAndRemovesAccountLinkage(t *testing.T) {
+func TestAuthenticateAcceptsOnlyTheOwningAccountKey(t *testing.T) {
     account := fixtureAccount(t, db)
-    response := authenticated(t, server, account.PlaintextKey, http.MethodPost, "/v1/account/disassociate", nil)
-    require.Equal(t, http.StatusNoContent, response.Code)
-    require.False(t, canAuthenticate(t, db, account.PlaintextKey))
-    require.Zero(t, accountPreferenceCount(t, db, account.ID))
-    require.Positive(t, deidentifiedInteractionCount(t, db))
+    require.True(t, canAuthenticate(t, db, account.PlaintextKey))
+    require.False(t, canAuthenticate(t, db, "not-an-issued-key"))
 }
 ~~~
 
 - [ ] **Step 2: Run it and verify failure**
 
-Run: POSTGRES_TEST_DSN=postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable go test ./server/internal/httpapi -run TestDisassociateRevokesKeysAndRemovesAccountLinkage -v
+Run: POSTGRES_TEST_DSN=postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable go test ./server/internal/httpapi -run TestAuthenticateAcceptsOnlyTheOwningAccountKey -v
 
 Expected: FAIL because migrations and endpoint do not exist.
 
 - [ ] **Step 3: Implement the identity boundary**
 
-Create accounts, api_keys, deidentified_subjects, preference_events, current_preferences, source_snapshots, source catalog tables, model_versions, item_neighbors, and user_recommendations. Hash keys using Argon2id. In one transaction, disassociation revokes all keys, rewrites retained interaction references to a deidentified subject, deletes account linkage, and returns 204. Bearer values must never be logged.
+Create accounts, api_keys, preference_events, engagement_events,
+current_preferences, source_snapshots, source catalog tables, model_versions,
+item_neighbors, and user_recommendations. Hash keys using Argon2id. Accounts
+remain directly associated with their events in v0; no disassociation,
+orphaning, or key-rollover behavior exists. Bearer values must never be logged.
 
 - [ ] **Step 4: Verify server tests**
 
@@ -212,10 +224,10 @@ Expected: PASS against PostgreSQL.
 
 ~~~text
 git add server/internal/store server/internal/auth server/internal/httpapi
-git commit -m "feat: add account storage and disassociation"
+git commit -m "feat: add account storage and authentication"
 ~~~
 
-### Task 4: Ingest Idempotent Rating Events
+### Task 4: Ingest Idempotent Interaction Events
 
 **Files:**
 - Create: server/internal/ingest/preferences.go
@@ -224,7 +236,7 @@ git commit -m "feat: add account storage and disassociation"
 - Create: server/internal/httpapi/preferences_test.go
 - Modify: server/internal/store/store.go
 
-**Interfaces:** PreferenceService.Accept(ctx, accountID, event) returns accepted; POST /v1/events/preferences returns 202 new, 200 exact replay, and 409 changed replay.
+**Interfaces:** InteractionService.Accept(ctx, accountID, event) returns accepted; POST /v1/events/interactions returns 202 new, 200 exact replay, and 409 changed replay.
 
 - [ ] **Step 1: Write failing ordering and remove tests**
 
@@ -251,7 +263,12 @@ Expected: FAIL because the ingestion service does not exist.
 
 - [ ] **Step 3: Implement transactional ingestion**
 
-Validate before writes. Insert immutable events once by subject/event ID plus body hash. Project only higher client_id/sequence values into unique subject_id/endpoint/stash_id rows. A remove deletes only the projection. Return 400 malformed, 401 unauthorized, 409 changed replay, 200 exact replay, and 202 accepted.
+Validate before writes. Insert immutable rating and engagement events once by
+account/event ID plus body hash. Project only higher client_id/sequence rating
+values into unique account/endpoint/stash_id rows; a remove deletes only that
+projection. Retain play/o events immutably for session rebuilding. Return 400
+malformed, 401 unauthorized, 409 changed replay, 200 exact replay, and 202
+accepted.
 
 - [ ] **Step 4: Verify server tests**
 
@@ -263,10 +280,51 @@ Expected: PASS with no partial writes.
 
 ~~~text
 git add server/internal/ingest server/internal/httpapi server/internal/store
-git commit -m "feat: ingest idempotent scene rating events"
+git commit -m "feat: ingest idempotent scene interactions"
 ~~~
 
-### Task 5: UPSERT Source-Authoritative Metadata Snapshots
+### Task 5: Build Rebuildable Engagement Sessions
+
+**Files:**
+- Create: server/internal/session/build.go
+- Create: server/internal/session/build_test.go
+- Modify: server/internal/store/migrations/001_initial.sql
+
+**Interfaces:** `session.Builder.Rebuild(ctx, accountID)` writes latency and
+o-bounded session items from immutable engagement events.
+
+- [ ] **Step 1: Write failing boundary tests**
+
+Test a two-hour gap remains in one latency session, a gap greater than two hours
+starts another, every o closes its o-bounded session, an orphan o becomes a
+one-scene closed session, and only consecutive repeats collapse.
+
+- [ ] **Step 2: Run tests and verify failure**
+
+Run: go test ./server/internal/session -v
+
+Expected: FAIL because the session builder does not exist.
+
+- [ ] **Step 3: Implement deterministic projections**
+
+Persist projection version/type/session/item order and rebuild transactionally
+from timestamp then event-ID ordered engagement rows. The two projections may
+intentionally contain the same event. Do not mutate immutable input events.
+
+- [ ] **Step 4: Verify server tests**
+
+Run: make test-server
+
+Expected: PASS for all session boundaries and repeat collapse.
+
+- [ ] **Step 5: Commit**
+
+~~~text
+git add server/internal/session server/internal/store
+git commit -m "feat: build engagement session projections"
+~~~
+
+### Task 6: UPSERT Source-Authoritative Metadata Snapshots
 
 **Files:**
 - Create: server/internal/catalog/snapshots.go
@@ -311,7 +369,7 @@ git add server/internal/catalog server/internal/httpapi server/internal/store
 git commit -m "feat: upsert source-authoritative catalog snapshots"
 ~~~
 
-### Task 6: Build Versioned PostgreSQL Recommendations
+### Task 7: Build Versioned PostgreSQL Recommendations
 
 **Files:**
 - Create: server/internal/model/interfaces.go
@@ -349,7 +407,15 @@ Expected: FAIL because model code does not exist.
 
 - [ ] **Step 3: Implement deterministic batch scoring**
 
-Generate collaborative item neighbors from mean-centered co-ratings with small-sample shrinkage. Add content candidates from shared endpoint-qualified performers, studios, tags, groups, and supported Stash-box attributes. Write an inactive model version, item_neighbors, and user_recommendations; atomically activate only after successful build. Response items contain content, score, reasons, model_version, and nullable canonical_url. Cold starts return empty items. Do not add global popularity or Annoy.
+Generate collaborative item neighbors from mean-centered co-ratings with
+small-sample shrinkage. Add weighted session co-occurrence and ordered
+transition candidates from both projections (`play=1.0`, configurable `o=1.5`),
+then content candidates from shared endpoint-qualified performers, studios,
+tags, groups, and supported Stash-box attributes. Write an inactive model
+version, item_neighbors, and user_recommendations; atomically activate only
+after successful build. Response items contain content, score, reasons,
+model_version, and nullable canonical_url. Cold starts return empty items. Do
+not add global popularity or Annoy.
 
 - [ ] **Step 4: Verify model and API tests**
 
@@ -364,9 +430,10 @@ git add server/cmd/recommendations server/internal/model server/internal/httpapi
 git commit -m "feat: build versioned postgres recommendations"
 ~~~
 
-**Review checkpoint:** Review authentication/disassociation, event ordering, metadata ownership, and the model response contract before plugin work.
+**Review checkpoint:** Review authentication, interaction ordering/sessionization,
+metadata ownership, and the model response contract before plugin work.
 
-### Task 7: Add Plugin Settings, Local Stash Client, and SQLite Outbox
+### Task 8: Add Plugin Settings, Local Stash Client, and SQLite Outbox
 
 **Files:**
 - Create: plugin/stashRecommendations/stashRecommendations.yml
@@ -378,7 +445,10 @@ git commit -m "feat: build versioned postgres recommendations"
 - Create: plugin/stashRecommendations/tests/test_stash_client.py
 - Create: plugin/stashRecommendations/tests/test_outbox.py
 
-**Interfaces:** Settings.from_plugin_config; StashClient.find_scene, iter_rated_scenes, iter_scene_stash_ids, configured_stash_boxes; Outbox.enqueue, next_ready, ack, record_retry, quarantine, status.
+**Interfaces:** Settings.from_plugin_config; StashClient.find_scene,
+iter_rated_scenes, iter_engagement_history, iter_scene_stash_ids,
+configured_stash_boxes; Outbox.enqueue, next_ready, ack, record_retry,
+quarantine, status.
 
 - [ ] **Step 1: Write the failing outbox test**
 
@@ -400,7 +470,12 @@ Expected: FAIL because plugin infrastructure does not exist.
 
 - [ ] **Step 3: Implement plugin infrastructure**
 
-Declare raw Python, settings service_url/api_key/show_remote_results, tasks sync-ratings/sync-metadata/deliver-outbox/status, and Scene.Update.Post hook capture-rating. Require HTTPS. Use server_connection/session cookie for local paginated GraphQL. SQLite rows hold event/snapshot JSON, attempt count, next attempt, state, and error; retry delay caps at one hour.
+Declare raw Python, settings service_url/api_key/show_remote_results, tasks
+sync-ratings/sync-engagement/sync-metadata/deliver-outbox/status, and
+Scene.Update.Post hook capture-rating. Require HTTPS. Use
+server_connection/session cookie for local paginated GraphQL. SQLite rows hold
+event/snapshot JSON, attempt count, next attempt, state, and error; retry delay
+caps at one hour. Status reports rating, play, and o counts separately.
 
 - [ ] **Step 4: Verify plugin infrastructure**
 
@@ -415,7 +490,7 @@ git add plugin/stashRecommendations
 git commit -m "feat: add stash plugin settings and durable outbox"
 ~~~
 
-### Task 8: Capture Ratings and Proxy Stash-box Metadata
+### Task 9: Capture Ratings, Engagement, and Proxy Stash-box Metadata
 
 **Files:**
 - Create: plugin/stashRecommendations/rec_plugin/capture.py
@@ -428,7 +503,10 @@ git commit -m "feat: add stash plugin settings and durable outbox"
 - Create: plugin/stashRecommendations/tests/test_sync.py
 - Modify: plugin/stashRecommendations/recommendations.py
 
-**Interfaces:** handle_scene_update(hook_context, stash, outbox, identity); SourceClient.fetch_scene(endpoint, api_key, stash_id); to_source_snapshot(endpoint, fetched_at, scene); queue_rating_sync and queue_metadata_sync.
+**Interfaces:** handle_scene_update(hook_context, stash, outbox, identity);
+queue_engagement_sync; SourceClient.fetch_scene(endpoint, api_key, stash_id);
+to_source_snapshot(endpoint, fetched_at, scene); queue_rating_sync and
+queue_metadata_sync.
 
 - [ ] **Step 1: Write failing fan-out and source-boundary tests**
 
@@ -453,7 +531,15 @@ Expected: FAIL because capture/source modules do not exist.
 
 - [ ] **Step 3: Implement capture and source proxying**
 
-Act only if inputFields contains rating100. Fetch the current local scene, enqueue one set/remove preference event per StashID, and return without network delivery. Read Stash-box endpoint/key pairs only from local Stash configuration. For configured matching endpoints, query canonical GraphQL data within its per-minute limiter, map only Stash-box schema fields, and queue snapshots separately. Rating sync displays count and requires confirmation; metadata sync deduplicates keys.
+Act only if inputFields contains rating100. Fetch the current local scene, enqueue
+one set/remove preference event per StashID, and return without network
+delivery. Historical engagement sync imports every timestamp from play_history
+and o_history, with later syncs importing only new values; every event fans out
+to external IDs and carries no local metadata. Read Stash-box endpoint/key pairs
+only from local Stash configuration. For configured matching endpoints, query
+canonical GraphQL data within its per-minute limiter, map only Stash-box schema
+fields, and queue snapshots separately. Rating and engagement sync display
+counts and require confirmation; metadata sync deduplicates keys.
 
 - [ ] **Step 4: Verify plugin capture tests**
 
@@ -465,10 +551,10 @@ Expected: PASS for half-star normalization, removal, tag-only no-op, unconfigure
 
 ~~~text
 git add plugin/stashRecommendations
-git commit -m "feat: capture ratings and proxy stash-box metadata"
+git commit -m "feat: capture interactions and proxy stash-box metadata"
 ~~~
 
-### Task 9: Deliver Outbox and Surface Stash UI
+### Task 10: Deliver Outbox and Surface Stash UI
 
 **Files:**
 - Create: plugin/stashRecommendations/rec_plugin/service_client.py
@@ -524,7 +610,7 @@ git commit -m "feat: deliver and surface stash recommendations"
 
 **Review checkpoint:** Review non-blocking hooks, source credential containment, retry behavior, and local-first UI results before end-to-end verification.
 
-### Task 10: Add Contract, End-to-End, and Manual Smoke Verification
+### Task 11: Add Contract, End-to-End, and Manual Smoke Verification
 
 **Files:**
 - Create: server/internal/httpapi/contract_test.go
@@ -556,7 +642,12 @@ Expected: FAIL until fixture wiring is written.
 
 - [ ] **Step 3: Implement shared fixture verification and README**
 
-Load every valid/invalid fixture through Go and Python validation. Mock source responses/rate limits and assert credentials appear only in plugin-to-source calls. Document PostgreSQL setup, admin key provisioning, plugin configuration, explicit sync, status, model build, disassociation, privacy, and manual smoke: multi-ID rate, clear rating, source refresh, cold start, remote toggle, outage/retry, and old-key rejection.
+Load every valid/invalid fixture through Go and Python validation. Mock source
+responses/rate limits and assert credentials appear only in plugin-to-source
+calls. Document PostgreSQL setup, admin key provisioning, plugin configuration,
+explicit rating/engagement sync, status counts, model build, privacy, and
+manual smoke: multi-ID rate, clear rating, historical play/o import, session
+boundaries, source refresh, cold start, remote toggle, and outage/retry.
 
 - [ ] **Step 4: Run complete verification**
 
@@ -573,6 +664,6 @@ git commit -m "test: verify end-to-end recommendation flow"
 
 ## Review Checkpoints
 
-- After Task 6: review authentication/disassociation, event ordering, metadata ownership, and the model response contract.
-- After Task 9: review that hooks do not make network calls, source credentials/local metadata remain client-side, and remote results are opt-in.
-- After Task 10: review automated output and manual Stash evidence before packaging or release.
+- After Task 7: review authentication, event ordering/sessionization, metadata ownership, and the model response contract.
+- After Task 10: review that hooks do not make network calls, source credentials/local metadata remain client-side, engagement privacy holds, and remote results are opt-in.
+- After Task 11: review automated output and manual Stash evidence before packaging or release.
