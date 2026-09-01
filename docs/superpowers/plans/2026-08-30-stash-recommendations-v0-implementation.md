@@ -60,7 +60,7 @@ tests/e2e/                              Mock Stash-box and E2E tests.
 
 **Interfaces:** config.Load() returns HTTPAddr and DatabaseURL. httpapi.NewMux() returns an http.Handler with GET /healthz. make test runs Go, Python, and Node tests.
 
-- [ ] **Step 1: Write the failing health test**
+- [x] **Step 1: Write the failing health test**
 
 ~~~go
 func TestHealthz(t *testing.T) {
@@ -71,13 +71,13 @@ func TestHealthz(t *testing.T) {
 }
 ~~~
 
-- [ ] **Step 2: Run it and verify it fails**
+- [x] **Step 2: Run it and verify it fails**
 
 Run: go test ./server/internal/httpapi -run TestHealthz -v
 
 Expected: FAIL because NewMux does not exist.
 
-- [ ] **Step 3: Implement the smallest runnable server**
+- [x] **Step 3: Implement the smallest runnable server**
 
 ~~~go
 func NewMux() http.Handler {
@@ -92,13 +92,13 @@ func NewMux() http.Handler {
 
 Create a PostgreSQL 16 compose service at port 5432 using database/user/password stash_recommendations. Makefile targets run go test ./server/..., python -m pytest plugin/stashRecommendations/tests, and node --test tests/ui.
 
-- [ ] **Step 4: Verify the bootstrap**
+- [x] **Step 4: Verify the bootstrap**
 
 Run: make test
 
 Expected: PASS for all smoke suites.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~text
 git add .gitignore Makefile docker-compose.yml go.mod go.sum package.json server plugin tests
@@ -576,4 +576,3 @@ git commit -m "test: verify end-to-end recommendation flow"
 - After Task 6: review authentication/disassociation, event ordering, metadata ownership, and the model response contract.
 - After Task 9: review that hooks do not make network calls, source credentials/local metadata remain client-side, and remote results are opt-in.
 - After Task 10: review automated output and manual Stash evidence before packaging or release.
-
