@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import socket
 import sqlite3
+from typing import Any
+from urllib import error
 
 from rec_plugin.outbox import Outbox
-from rec_plugin.source_client import SourceClient
+from rec_plugin.source_client import HTTP_TIMEOUT_SECONDS, SourceClient
 from rec_plugin.sync import SyncState, build_history_event_id, queue_engagement_sync, queue_metadata_sync, queue_rating_sync
 from recommendations import run
 
@@ -238,6 +241,74 @@ def test_queue_metadata_sync_continues_after_per_key_mapping_failure(tmp_path: P
     assert payloads[0]["content_key"] == {"endpoint": "https://box.example/graphql", "stash_id": "scene-2"}
 
 
+def test_queue_metadata_sync_continues_after_timeout_failure_per_key(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    database_path = tmp_path / "recommendations.sqlite3"
+    stash = FakeStash(
+        rated_scenes=[
+            {
+                "id": "1",
+                "rating100": 80,
+                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}],
+            },
+            {
+                "id": "2",
+                "rating100": 40,
+                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-2"}],
+            },
+        ]
+    )
+    timeouts: list[float] = []
+
+    def fake_urlopen(http_request: Any, timeout: float) -> object:
+        payload = json.loads(http_request.data.decode("utf-8"))
+        stash_id = str(payload["variables"]["id"])
+        timeouts.append(timeout)
+        if stash_id == "scene-1":
+            raise error.URLError(socket.timeout("timed out"))
+        return FakeHTTPResponse(
+            {
+                "data": {
+                    "findScene": {
+                        "id": stash_id,
+                        "title": f"Example {stash_id}",
+                        "release_date": "2026-08-30",
+                        "urls": [f"https://example.test/scenes/{stash_id}"],
+                        "updated": "2026-08-31T00:00:00Z",
+                        "images": [{"url": "https://images.example/scene.jpg"}],
+                        "performers": [],
+                        "tags": [],
+                    }
+                }
+            }
+        )
+
+    monkeypatch.setattr("rec_plugin.source_client.request.urlopen", fake_urlopen)
+    source = SourceClient(
+        [{"endpoint": "https://box.example/graphql", "api_key": "source-key", "max_requests_per_minute": 30}]
+    )
+    outbox = Outbox(database_path)
+
+    result = queue_metadata_sync(stash, outbox, source, confirmed=True)
+    payloads = _pending_payloads(database_path, "source_snapshot")
+
+    assert result == {
+        "queued": 1,
+        "failed": 1,
+        "kind": "metadata-sync",
+        "errors": [
+            {
+                "content_key": {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
+                "error": "timed out",
+            }
+        ],
+    }
+    assert len(payloads) == 1
+    assert payloads[0]["content_key"] == {"endpoint": "https://box.example/graphql", "stash_id": "scene-2"}
+    assert timeouts == [HTTP_TIMEOUT_SECONDS, HTTP_TIMEOUT_SECONDS]
+
+
 def test_sync_engagement_mode_requires_confirmation_before_queueing(tmp_path: Path, monkeypatch: object) -> None:
     monkeypatch.setattr(
         "recommendations.StashClient",
@@ -297,3 +368,18 @@ def _pending_payloads(path: Path, item_type: str) -> list[dict[str, object]]:
             (item_type,),
         ).fetchall()
     return [json.loads(row[0]) for row in rows]
+
+
+class FakeHTTPResponse:
+    def __init__(self, body: dict[str, object]) -> None:
+        self._payload = json.dumps(body).encode("utf-8")
+
+    def __enter__(self) -> "FakeHTTPResponse":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        del exc_type, exc, tb
+        return None
+
+    def read(self) -> bytes:
+        return self._payload

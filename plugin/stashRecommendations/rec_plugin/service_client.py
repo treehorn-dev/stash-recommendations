@@ -8,6 +8,8 @@ from urllib import error, parse, request
 from rec_plugin.delivery import ServiceResponse
 from rec_plugin.settings import Settings
 
+HTTP_TIMEOUT_SECONDS = 10.0
+
 
 class ServiceClient:
     def __init__(self, settings: Settings) -> None:
@@ -46,7 +48,7 @@ class ServiceClient:
             headers["Content-Type"] = "application/json"
         http_request = request.Request(self._url(path), data=body, headers=headers, method=method)
         try:
-            with request.urlopen(http_request) as response:
+            with request.urlopen(http_request, timeout=HTTP_TIMEOUT_SECONDS) as response:
                 return ServiceResponse(
                     status_code=response.status,
                     retry_after_seconds=_retry_after_seconds(response.headers.get("Retry-After")),

@@ -195,7 +195,7 @@ Use this flow against a local Stash only when one is available:
 3. Clear that rating; run `deliver-outbox`; confirm one `scene.rating.remove` is delivered and the queue drains again.
 4. Run `sync-ratings` and confirm the preview count matches the currently rated local scenes before re-running with confirmation.
 5. Run `sync-engagement` and confirm the preview count matches imported `play_history` plus `o_history` timestamps before re-running with confirmation.
-6. Run `sync-metadata` with a configured Stash-box source; confirm snapshots are delivered and a source API key does not appear in `source_snapshots.raw_json`.
+6. Run `sync-metadata` with a configured Stash-box source; confirm snapshots are delivered and a source API key does not appear in the persisted `source_snapshots.snapshot` JSON payload.
 7. Run the one-off model build helper; open a related scene page and confirm related content resolves locally by default.
 8. Enable `show_remote_results`; confirm remote-only items appear as canonical source links while local items still resolve through Stash.
 9. Stop the service, run `deliver-outbox`, and confirm `status` shows pending items plus a retryable `last_error`; restart the service and re-run `deliver-outbox` to clear the queue.
