@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
+import math
 import re
 from typing import Any, Optional
 from urllib.parse import urlparse, urlunparse
@@ -20,7 +21,7 @@ class ContentKey:
 
     @classmethod
     def normalize(cls, endpoint: str, stash_id: str) -> "ContentKey":
-        if not stash_id.strip():
+        if not isinstance(endpoint, str) or not isinstance(stash_id, str) or not stash_id.strip():
             raise ValueError("stash_id is required")
         parsed = urlparse(endpoint)
         if not parsed.scheme or not parsed.netloc:
@@ -53,15 +54,15 @@ class PreferenceEvent:
         UUID(self.client_id)
         if type(self.sequence) is not int or self.sequence < 1:
             raise ValueError("sequence must be at least 1")
-        if self.occurred_at.tzinfo is None:
-            raise ValueError("occurred_at must be timezone-aware")
+        if not isinstance(self.occurred_at, datetime) or self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() != timedelta(0):
+            raise ValueError("occurred_at must be UTC")
         self.content_key = ContentKey.normalize(self.content_key.endpoint, self.content_key.stash_id)
         if self.kind == "scene.rating.set":
-            if self.rating is None or not 0 <= self.rating <= 1:
+            if type(self.rating) not in (int, float) or not math.isfinite(self.rating) or not 0 <= self.rating <= 1:
                 raise ValueError("scene.rating.set requires rating between 0 and 1")
-        elif self.kind == "scene.rating.remove":
+        elif self.kind in {"scene.rating.remove", "scene.played", "scene.o"}:
             if self.rating is not None:
-                raise ValueError("scene.rating.remove prohibits rating")
+                raise ValueError(f"{self.kind} prohibits rating")
         else:
             raise ValueError("unsupported preference event kind")
         if not self.origin.strip():
@@ -71,7 +72,7 @@ class PreferenceEvent:
         self.validate()
         payload = asdict(self)
         payload["occurred_at"] = self.occurred_at.isoformat().replace("+00:00", "Z")
-        if self.kind == "scene.rating.remove":
+        if self.kind != "scene.rating.set":
             payload.pop("rating")
         return payload
 
@@ -90,7 +91,7 @@ class SourceSnapshot:
     def validate(self) -> None:
         if type(self.schema_version) is not int or self.schema_version != 1:
             raise ValueError("schema_version must be 1")
-        if self.captured_at.tzinfo is None:
+        if not isinstance(self.captured_at, datetime) or self.captured_at.tzinfo is None:
             raise ValueError("captured_at must be timezone-aware")
         self.content_key = ContentKey.normalize(self.content_key.endpoint, self.content_key.stash_id)
         if not isinstance(self.scenes, list) or not isinstance(self.performers, list):
@@ -113,12 +114,19 @@ def _validate_scene(scene: object, index: int) -> None:
     _reject_unknown_fields(scene, SCENE_FIELDS, f"scenes[{index}]")
     if not isinstance(scene.get("id"), str) or not scene["id"].strip():
         raise ValueError(f"scenes[{index}] scene id is required")
-    studio = scene.get("studio")
-    if studio is not None:
-        _validate_named_record(studio, f"scenes[{index}].studio")
-    for tag_index, tag in enumerate(scene.get("tags", [])):
+    _validate_optional_strings(scene, index, {"title", "details", "director", "code"})
+    _validate_date_values(scene, index)
+    _validate_string_collection(scene, index, "urls")
+    _validate_string_collection(scene, index, "remote_images")
+    if "duration" in scene and (type(scene["duration"]) is not int or scene["duration"] < 0):
+        raise ValueError(f"scenes[{index}].duration must be a non-negative integer")
+    if "studio" in scene:
+        _validate_named_record(scene["studio"], f"scenes[{index}].studio")
+    tags = _collection(scene, index, "tags")
+    for tag_index, tag in enumerate(tags):
         _validate_named_record(tag, f"scenes[{index}].tags[{tag_index}]")
-    for appearance_index, appearance in enumerate(scene.get("performer_appearances", [])):
+    appearances = _collection(scene, index, "performer_appearances")
+    for appearance_index, appearance in enumerate(appearances):
         if not isinstance(appearance, dict) or set(appearance) != {"performer_id"} or not isinstance(appearance["performer_id"], str) or not appearance["performer_id"].strip():
             raise ValueError(f"scenes[{index}].performer_appearances[{appearance_index}] performer_id is required")
 
@@ -129,6 +137,13 @@ def _validate_performer(performer: object, index: int) -> None:
     _reject_unknown_fields(performer, PERFORMER_FIELDS, f"performers[{index}]")
     if not isinstance(performer.get("id"), str) or not performer["id"].strip() or not isinstance(performer.get("name"), str) or not performer["name"].strip():
         raise ValueError(f"performers[{index}] performer id and name are required")
+    _validate_optional_strings(performer, index, {"gender", "country", "ethnicity", "eye_color", "hair_color", "measurements"}, "performers")
+    for field in ("aliases", "urls", "remote_images"):
+        _validate_string_collection(performer, index, field, "performers")
+    career_years = _collection(performer, index, "career_years", "performers")
+    for year_index, year in enumerate(career_years):
+        if type(year) is not int:
+            raise ValueError(f"performers[{index}].career_years[{year_index}] must be an integer")
 
 
 def _validate_named_record(record: object, label: str) -> None:
@@ -140,3 +155,34 @@ def _reject_unknown_fields(record: dict[str, Any], allowed_fields: set[str], lab
     unknown_fields = set(record) - allowed_fields
     if unknown_fields:
         raise ValueError(f"{label} contains unsupported field {sorted(unknown_fields)[0]}")
+
+
+def _collection(record: dict[str, Any], index: int, field: str, collection_name: str = "scenes") -> list[Any]:
+    if field not in record:
+        return []
+    value = record[field]
+    if not isinstance(value, list):
+        raise ValueError(f"{collection_name}[{index}].{field} must be an array")
+    return value
+
+
+def _validate_optional_strings(record: dict[str, Any], index: int, fields: set[str], collection_name: str = "scenes") -> None:
+    for field in fields:
+        if field in record and not isinstance(record[field], str):
+            raise ValueError(f"{collection_name}[{index}].{field} must be a string")
+
+
+def _validate_string_collection(record: dict[str, Any], index: int, field: str, collection_name: str = "scenes") -> None:
+    for value_index, value in enumerate(_collection(record, index, field, collection_name)):
+        if not isinstance(value, str):
+            raise ValueError(f"{collection_name}[{index}].{field}[{value_index}] must be a string")
+
+
+def _validate_date_values(scene: dict[str, Any], index: int) -> None:
+    for date_index, value in enumerate(_collection(scene, index, "dates")):
+        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError(f"scenes[{index}].dates[{date_index}] must be a valid date")
+        try:
+            date.fromisoformat(value)
+        except ValueError as error:
+            raise ValueError(f"scenes[{index}].dates[{date_index}] must be a valid date") from error

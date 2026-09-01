@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"regexp"
 	"strings"
@@ -14,6 +15,8 @@ import (
 const (
 	PreferenceEventKindSceneRatingSet    = "scene.rating.set"
 	PreferenceEventKindSceneRatingRemove = "scene.rating.remove"
+	PreferenceEventKindScenePlayed       = "scene.played"
+	PreferenceEventKindSceneO            = "scene.o"
 )
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -89,18 +92,21 @@ func (event *PreferenceEvent) Validate() error {
 	if event.OccurredAt.IsZero() {
 		return fmt.Errorf("occurred_at is required")
 	}
+	if event.OccurredAt.Location() != time.UTC {
+		return fmt.Errorf("occurred_at must be UTC")
+	}
 	if err := event.ContentKey.NormalizeInPlace(); err != nil {
 		return fmt.Errorf("content_key: %w", err)
 	}
 
 	switch event.Kind {
 	case PreferenceEventKindSceneRatingSet:
-		if event.Rating == nil || *event.Rating < 0 || *event.Rating > 1 {
+		if event.Rating == nil || math.IsNaN(*event.Rating) || math.IsInf(*event.Rating, 0) || *event.Rating < 0 || *event.Rating > 1 {
 			return fmt.Errorf("scene.rating.set requires rating between 0 and 1")
 		}
-	case PreferenceEventKindSceneRatingRemove:
+	case PreferenceEventKindSceneRatingRemove, PreferenceEventKindScenePlayed, PreferenceEventKindSceneO:
 		if event.Rating != nil {
-			return fmt.Errorf("scene.rating.remove prohibits rating")
+			return fmt.Errorf("%s prohibits rating", event.Kind)
 		}
 	default:
 		return fmt.Errorf("unsupported preference event kind %q", event.Kind)
@@ -109,6 +115,26 @@ func (event *PreferenceEvent) Validate() error {
 		return fmt.Errorf("origin is required")
 	}
 	return nil
+}
+
+func (event *PreferenceEvent) UnmarshalJSON(data []byte) error {
+	if err := rejectNullFields(data, "schema_version", "event_id", "client_id", "sequence", "occurred_at", "content_key", "kind", "origin"); err != nil {
+		return err
+	}
+	type preferenceEvent PreferenceEvent
+	var value preferenceEvent
+	if err := strictUnmarshalJSON(data, &value); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if _, hasRating := raw["rating"]; hasRating && value.Kind != PreferenceEventKindSceneRatingSet {
+		return fmt.Errorf("%s prohibits rating", value.Kind)
+	}
+	*event = PreferenceEvent(value)
+	return event.Validate()
 }
 
 type SourceSnapshot struct {
@@ -146,6 +172,9 @@ func (snapshot *SourceSnapshot) Validate() error {
 }
 
 func (snapshot *SourceSnapshot) UnmarshalJSON(data []byte) error {
+	if err := rejectNullFields(data, "schema_version", "content_key", "captured_at", "scenes", "performers"); err != nil {
+		return err
+	}
 	type sourceSnapshot SourceSnapshot
 	var value sourceSnapshot
 	if err := strictUnmarshalJSON(data, &value); err != nil {
@@ -185,6 +214,14 @@ func (scene *Scene) Validate() error {
 	if scene.Studio != nil && (strings.TrimSpace(scene.Studio.ID) == "" || strings.TrimSpace(scene.Studio.Name) == "") {
 		return fmt.Errorf("studio id and name are required")
 	}
+	if scene.Duration != nil && *scene.Duration < 0 {
+		return fmt.Errorf("duration must not be negative")
+	}
+	for index, date := range scene.Dates {
+		if _, err := time.Parse("2006-01-02", date); err != nil {
+			return fmt.Errorf("dates[%d] must be a valid date", index)
+		}
+	}
 	for index, tag := range scene.Tags {
 		if strings.TrimSpace(tag.ID) == "" || strings.TrimSpace(tag.Name) == "" {
 			return fmt.Errorf("tags[%d] id and name are required", index)
@@ -199,6 +236,9 @@ func (scene *Scene) Validate() error {
 }
 
 func (scene *Scene) UnmarshalJSON(data []byte) error {
+	if err := rejectNullFields(data, "id", "title", "details", "dates", "urls", "duration", "director", "code", "studio", "tags", "performer_appearances", "remote_images"); err != nil {
+		return err
+	}
 	type sceneValue Scene
 	var value sceneValue
 	if err := strictUnmarshalJSON(data, &value); err != nil {
@@ -231,6 +271,9 @@ func (performer *Performer) Validate() error {
 }
 
 func (performer *Performer) UnmarshalJSON(data []byte) error {
+	if err := rejectNullFields(data, "id", "name", "aliases", "gender", "country", "ethnicity", "eye_color", "hair_color", "measurements", "career_years", "urls", "remote_images"); err != nil {
+		return err
+	}
 	type performerValue Performer
 	var value performerValue
 	if err := strictUnmarshalJSON(data, &value); err != nil {
@@ -246,6 +289,9 @@ type Studio struct {
 }
 
 func (studio *Studio) UnmarshalJSON(data []byte) error {
+	if err := rejectNullFields(data, "id", "name"); err != nil {
+		return err
+	}
 	type studioValue Studio
 	var value studioValue
 	if err := strictUnmarshalJSON(data, &value); err != nil {
@@ -261,6 +307,9 @@ type Tag struct {
 }
 
 func (tag *Tag) UnmarshalJSON(data []byte) error {
+	if err := rejectNullFields(data, "id", "name"); err != nil {
+		return err
+	}
 	type tagValue Tag
 	var value tagValue
 	if err := strictUnmarshalJSON(data, &value); err != nil {
@@ -275,6 +324,9 @@ type PerformerAppearance struct {
 }
 
 func (appearance *PerformerAppearance) UnmarshalJSON(data []byte) error {
+	if err := rejectNullFields(data, "performer_id"); err != nil {
+		return err
+	}
 	type appearanceValue PerformerAppearance
 	var value appearanceValue
 	if err := strictUnmarshalJSON(data, &value); err != nil {
@@ -292,6 +344,19 @@ func strictUnmarshalJSON(data []byte, target any) error {
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return fmt.Errorf("invalid trailing JSON data")
+	}
+	return nil
+}
+
+func rejectNullFields(data []byte, fields ...string) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for _, field := range fields {
+		if value, ok := raw[field]; ok && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("%s must not be null", field)
+		}
 	}
 	return nil
 }
