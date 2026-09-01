@@ -148,3 +148,46 @@ Final result: clean.
 Independent review has not been requested or performed: the Task 7 direction
 explicitly prohibits subagents. The implementation and this evidence commit
 are ready for the required independent review; no later task has been started.
+
+## Fix Round 1/5
+
+Addressed every scoped reviewer finding without starting plugin work.
+
+- Replaced the raw-rating bonus with deterministic user-mean-centered,
+  norm-normalized co-rating similarity and `count / (count + 2)` shrinkage.
+- Filtered all model edges through validated `source_scenes`, so related and
+  For You output cannot contain uncataloged scenes.
+- Added validated metadata candidates for normalized code/title equality,
+  shared dates, and similar duration. Groups remain unavailable because the
+  schema has no validated group relation.
+- Ordered pair construction and personalized accumulation; a permutation test
+  proves deterministic projection output.
+- Zero ratings are known-but-not-affinity seeds; nullable canonical URLs are
+  serialized explicitly as JSON `null`; non-finite `MODEL_O_WEIGHT` values are
+  rejected.
+
+### TDD evidence
+
+The focused RED command added model, HTTP, and config regressions before code:
+`go test ./server/internal/model ./server/internal/httpapi ./server/internal/config -run 'Test(BuildProjectsOnlyValidatedCatalogScenes|CollaborativeSimilarityIsMeanCenteredNormalizedAndShrunk|BuildProjectionIsDeterministicForInputOrder|ForYouTreatsZeroRatingAsKnownContent|CatalogCandidatesIncludeValidatedSceneAttributes|RecommendationReadsReturnEmptyColdStartAndOmitCanonicalURL|LoadDefaultsAndValidatesModelOWeight)' -v`.
+
+RED result: missing aggregate-similarity/catalog-input APIs, omitted
+`canonical_url`, and accepted `NaN`/`+Inf` values. The same focused suite
+passed after implementation, including active-version rollback coverage.
+
+### Verification
+
+- `POSTGRES_TEST_DSN=... go test ./server/... -v`: PASS.
+- `go vet ./server/...`: PASS.
+- `PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests -q`: 48 passed (two non-failing sandbox cache-write warnings).
+- `node --test tests/ui/*.test.js`: 1 passed.
+- `git diff --check`: clean.
+
+### Files and commits
+
+- Changed: `server/internal/model/{build.go,build_test.go,repository.go,interfaces.go}`, `server/internal/httpapi/recommendations_test.go`, and `server/internal/config/{config.go,config_test.go}`.
+- `eab985f` `fix: harden recommendation model projections`
+- `docs: record task 7 fix round 1 evidence` (this report commit)
+
+Concern: group similarity remains intentionally unavailable until a validated
+group relation exists in the catalog schema.
