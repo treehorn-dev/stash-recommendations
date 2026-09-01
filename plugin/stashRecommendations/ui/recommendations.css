@@ -1,0 +1,67 @@
+.stash-recommendations {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 0;
+}
+
+.stash-recommendations__header {
+  align-items: baseline;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.stash-recommendations__version {
+  color: var(--muted, #6c757d);
+  font-size: 0.875rem;
+}
+
+.stash-recommendations__summary {
+  color: var(--muted, #6c757d);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stash-recommendations__grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.stash-recommendations__card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 5rem;
+  padding: 0.875rem 1rem;
+  text-decoration: none;
+}
+
+.stash-recommendations__card:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  text-decoration: none;
+}
+
+.stash-recommendations__card--remote {
+  border-style: dashed;
+}
+
+.stash-recommendations__card-title {
+  font-weight: 600;
+}
+
+.stash-recommendations__card-meta {
+  color: var(--muted, #6c757d);
+  font-size: 0.875rem;
+}
+
+.stash-recommendations__state {
+  color: var(--muted, #6c757d);
+  padding: 1rem 0;
+}

@@ -6,6 +6,11 @@ exec:
   - python3
   - "{pluginDir}/recommendations.py"
 interface: raw
+ui:
+  javascript:
+    - ui/recommendations.js
+  css:
+    - ui/recommendations.css
 settings:
   api_key:
     displayName: API Key

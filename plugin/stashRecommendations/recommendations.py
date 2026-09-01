@@ -5,11 +5,15 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from rec_plugin.contracts import ContentKey
 from rec_plugin.capture import handle_scene_update
+from rec_plugin.delivery import DeliveryWorker
 from rec_plugin.outbox import Outbox
+from rec_plugin.service_client import ServiceClient
 from rec_plugin.source_client import SourceClient
 from rec_plugin.settings import Settings
 from rec_plugin.stash_client import StashClient
+from rec_plugin.status import build_status_output
 from rec_plugin.sync import SyncState, queue_engagement_sync, queue_metadata_sync, queue_rating_sync
 
 
@@ -47,10 +51,7 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
     if mode == "status":
         plugin_config = stash.plugin_config(PLUGIN_ID)
         settings = Settings.from_plugin_config(plugin_config)
-        output["output"] = {
-            "settings": settings.to_status(),
-            "outbox": outbox.status(),
-        }
+        output["output"] = build_status_output(settings, outbox.status())
         return
     if mode == "sync-ratings":
         output["output"] = queue_rating_sync(stash, outbox, state, confirmed=bool(args.get("confirmed", False)))
@@ -67,13 +68,71 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
         )
         return
     if mode == "deliver-outbox":
-        output["output"] = {"queued": 0, "kind": "task", "mode": mode}
+        plugin_config = stash.plugin_config(PLUGIN_ID)
+        settings = Settings.from_plugin_config(plugin_config)
+        if not settings.service_url or not settings.api_key:
+            output["output"] = build_status_output(settings, outbox.status())
+            return
+        delivery = DeliveryWorker(outbox, ServiceClient(settings)).deliver_ready(_utcnow())
+        payload = build_status_output(settings, outbox.status())
+        payload["delivery"] = {
+            "delivered": delivery.delivered,
+            "retried": delivery.retried,
+            "quarantined": delivery.quarantined,
+            "paused": delivery.paused,
+        }
+        output["output"] = payload
+        return
+    if mode == "fetch-related":
+        plugin_config = stash.plugin_config(PLUGIN_ID)
+        settings = Settings.from_plugin_config(plugin_config)
+        output["output"] = _fetch_related(
+            ServiceClient(settings),
+            list(args.get("content_keys", [])),
+            int(args.get("limit", 20)),
+        )
+        return
+    if mode == "fetch-for-you":
+        plugin_config = stash.plugin_config(PLUGIN_ID)
+        settings = Settings.from_plugin_config(plugin_config)
+        if not settings.service_url or not settings.api_key:
+            output["output"] = {"model_version": "", "items": []}
+            return
+        output["output"] = ServiceClient(settings).fetch_for_you(int(args.get("limit", 20)))
         return
     raise ValueError(f"unsupported mode: {mode}")
 
 
 def _plugin_dir(server_connection: dict[str, Any]) -> Path:
     return Path(server_connection.get("PluginDir") or Path(__file__).resolve().parent)
+
+
+def _utcnow():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
+def _fetch_related(service: ServiceClient, content_keys: list[dict[str, Any]], limit: int) -> dict[str, Any]:
+    if not content_keys:
+        return {"model_version": "", "items": []}
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    model_version = ""
+    for item in content_keys:
+        key = ContentKey.normalize(str(item.get("endpoint", "")), str(item.get("stash_id", "")))
+        response = service.fetch_related([{"endpoint": key.endpoint, "stash_id": key.stash_id}], limit)
+        if not model_version:
+            model_version = str(response.get("model_version", ""))
+        for candidate in response.get("items", []):
+            content_key = dict(candidate.get("content_key", {}))
+            marker = (
+                str(content_key.get("endpoint", "")),
+                str(content_key.get("stash_id", "")),
+            )
+            if marker not in merged or float(candidate.get("score", 0.0)) > float(merged[marker].get("score", 0.0)):
+                merged[marker] = dict(candidate)
+    items = sorted(merged.values(), key=lambda item: float(item.get("score", 0.0)), reverse=True)[:limit]
+    return {"model_version": model_version, "items": items}
 
 
 if __name__ == "__main__":  # pragma: no cover - raw plugin boundary

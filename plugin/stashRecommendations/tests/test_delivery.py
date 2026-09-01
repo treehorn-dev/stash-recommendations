@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from rec_plugin.contracts import ContentKey, PreferenceEvent, SourceSnapshot
+from rec_plugin.delivery import DeliveryWorker, ServiceResponse
+from rec_plugin import outbox as outbox_module
+from rec_plugin.outbox import Outbox
+from recommendations import run
+
+
+NOW = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+CONTENT = ContentKey.normalize("https://box.example/graphql", "scene-1")
+
+
+def test_401_pauses_delivery_and_persists_auth_status(tmp_path: Path, monkeypatch: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    outbox = seeded_outbox(tmp_path)
+    client = FakeServiceClient([ServiceResponse(status_code=401)])
+
+    result = DeliveryWorker(outbox, client).deliver_ready(NOW)
+
+    assert result.paused is True
+    assert result.delivered == 0
+    assert result.retried == 0
+    assert result.quarantined == 0
+    assert outbox.status()["paused"] == {
+        "active": True,
+        "reason": "service authentication failed",
+    }
+    assert outbox.status()["pending"]["rating"] == 1
+
+
+def test_422_quarantines_invalid_events_and_snapshots_deliver_independently(tmp_path: Path, monkeypatch: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    outbox = seeded_outbox(tmp_path)
+    outbox.enqueue(snapshot())
+    client = FakeServiceClient(
+        [
+            ServiceResponse(status_code=422, error="schema invalid"),
+            ServiceResponse(status_code=202),
+        ]
+    )
+
+    result = DeliveryWorker(outbox, client).deliver_ready(NOW)
+    status = outbox.status()
+
+    assert result.paused is False
+    assert result.delivered == 1
+    assert result.quarantined == 1
+    assert status["quarantined"]["rating"] == 1
+    assert status["delivered"]["snapshot"] == 1
+    assert status["last_error"] == "schema invalid"
+
+
+def test_429_uses_retry_after_header_for_next_attempt(tmp_path: Path, monkeypatch: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    outbox = seeded_outbox(tmp_path)
+    client = FakeServiceClient([ServiceResponse(status_code=429, retry_after_seconds=90)])
+
+    result = DeliveryWorker(outbox, client).deliver_ready(NOW)
+
+    assert result.retried == 1
+    assert outbox.next_ready(NOW + timedelta(seconds=89)) is None
+    assert outbox.next_ready(NOW + timedelta(seconds=90)) is not None
+
+
+def test_network_and_5xx_errors_retry_without_quarantine(tmp_path: Path, monkeypatch: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    outbox = seeded_outbox(tmp_path)
+    client = FakeServiceClient([OSError("connection reset"), ServiceResponse(status_code=503, error="server busy")])
+
+    first = DeliveryWorker(outbox, client).deliver_ready(NOW)
+    second = DeliveryWorker(outbox, client).deliver_ready(NOW + timedelta(minutes=2))
+    status = outbox.status()
+
+    assert first.retried == 1
+    assert second.retried == 1
+    assert status["pending"]["rating"] == 1
+    assert status["quarantined"]["rating"] == 0
+    assert status["last_error"] == "server busy"
+
+
+def test_fetch_related_mode_merges_unique_results_across_content_keys(tmp_path: Path, monkeypatch: object) -> None:
+    client = FakeReadServiceClient(
+        {
+            ("https://box.example/graphql", "scene-1"): {
+                "model_version": "model-1",
+                "items": [
+                    recommendation_item("scene-a", 0.8),
+                    recommendation_item("scene-b", 0.6),
+                ],
+            },
+            ("https://box-2.example/graphql", "scene-2"): {
+                "model_version": "model-1",
+                "items": [
+                    recommendation_item("scene-b", 0.6),
+                    recommendation_item("scene-c", 0.9),
+                ],
+            },
+        }
+    )
+    monkeypatch.setattr("recommendations.StashClient", lambda server_connection: FakeConfiguredStash(tmp_path))
+    monkeypatch.setattr("recommendations.ServiceClient", lambda settings: client)
+
+    output: dict[str, object] = {}
+    run(
+        {
+            "server_connection": {"PluginDir": str(tmp_path)},
+            "args": {
+                "mode": "fetch-related",
+                "content_keys": [
+                    {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
+                    {"endpoint": "https://box-2.example/graphql", "stash_id": "scene-2"},
+                ],
+                "limit": 2,
+            },
+        },
+        output,
+    )
+
+    assert client.related_calls == [
+        ([{"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}], 2),
+        ([{"endpoint": "https://box-2.example/graphql", "stash_id": "scene-2"}], 2),
+    ]
+    assert output["output"] == {
+        "items": [
+            recommendation_item("scene-c", 0.9),
+            recommendation_item("scene-a", 0.8),
+        ],
+        "model_version": "model-1",
+    }
+
+
+def test_fetch_for_you_mode_proxies_authenticated_read_without_api_key_markup(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    client = FakeReadServiceClient({}, for_you={"model_version": "model-2", "items": [recommendation_item("scene-z", 0.5)]})
+    monkeypatch.setattr("recommendations.StashClient", lambda server_connection: FakeConfiguredStash(tmp_path))
+    monkeypatch.setattr("recommendations.ServiceClient", lambda settings: client)
+
+    output: dict[str, object] = {}
+    run(
+        {
+            "server_connection": {"PluginDir": str(tmp_path)},
+            "args": {"mode": "fetch-for-you", "limit": 8},
+        },
+        output,
+    )
+
+    encoded = str(output["output"])
+
+    assert client.for_you_calls == [8]
+    assert output["output"] == {"model_version": "model-2", "items": [recommendation_item("scene-z", 0.5)]}
+    assert "secret-api-key" not in encoded
+
+
+def seeded_outbox(tmp_path: Path) -> Outbox:
+    outbox = Outbox(tmp_path / "recommendations.sqlite3")
+    outbox.enqueue(
+        PreferenceEvent(
+            schema_version=1,
+            event_id="550e8400-e29b-41d4-a716-446655440110",
+            client_id="550e8400-e29b-41d4-a716-446655440001",
+            sequence=1,
+            occurred_at=NOW,
+            content_key=CONTENT,
+            kind="scene.rating.set",
+            origin="hook",
+            rating=0.8,
+        )
+    )
+    return outbox
+
+
+def snapshot() -> SourceSnapshot:
+    return SourceSnapshot(
+        schema_version=1,
+        content_key=CONTENT,
+        captured_at=NOW,
+        source_updated_at=NOW,
+        scenes=[{"id": "scene-1", "title": "Example"}],
+        performers=[],
+    )
+
+
+class FakeServiceClient:
+    def __init__(self, responses: list[ServiceResponse | Exception]) -> None:
+        self._responses = list(responses)
+        self.preference_events: list[dict[str, object]] = []
+        self.snapshots: list[dict[str, object]] = []
+
+    def deliver_preference_event(self, payload: dict[str, object]) -> ServiceResponse:
+        self.preference_events.append(payload)
+        return self._next_response()
+
+    def deliver_snapshot(self, payload: dict[str, object]) -> ServiceResponse:
+        self.snapshots.append(payload)
+        return self._next_response()
+
+    def _next_response(self) -> ServiceResponse:
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+def freeze_outbox_now(monkeypatch: object) -> None:
+    monkeypatch.setattr(outbox_module, "_utcnow", lambda: NOW)
+
+
+class FakeConfiguredStash:
+    def __init__(self, tmp_path: Path) -> None:
+        self._tmp_path = tmp_path
+
+    def plugin_config(self, plugin_id: str) -> dict[str, object]:
+        assert plugin_id == "stashRecommendations"
+        return {
+            "service_url": "https://stashrec.example",
+            "api_key": "secret-api-key",
+            "show_remote_results": False,
+        }
+
+
+class FakeReadServiceClient:
+    def __init__(self, related: dict[tuple[str, str], dict[str, object]], *, for_you: dict[str, object] | None = None) -> None:
+        self._related = related
+        self._for_you = for_you or {"model_version": "", "items": []}
+        self.related_calls: list[tuple[list[dict[str, str]], int]] = []
+        self.for_you_calls: list[int] = []
+
+    def fetch_related(self, content_keys: list[dict[str, str]], limit: int) -> dict[str, object]:
+        self.related_calls.append((content_keys, limit))
+        key = content_keys[0]["endpoint"], content_keys[0]["stash_id"]
+        return dict(self._related[key])
+
+    def fetch_for_you(self, limit: int) -> dict[str, object]:
+        self.for_you_calls.append(limit)
+        return dict(self._for_you)
+
+
+def recommendation_item(stash_id: str, score: float) -> dict[str, object]:
+    return {
+        "content_key": {"endpoint": "https://box.example/graphql", "stash_id": stash_id},
+        "score": score,
+        "reasons": ["session_cooccurrence"],
+        "model_version": "model-1",
+        "canonical_url": f"https://box.example/scenes/{stash_id}",
+    }

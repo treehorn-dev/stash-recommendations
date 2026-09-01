@@ -103,6 +103,15 @@ class Outbox:
             connection.execute("DELETE FROM outbox WHERE id = ?", (row_id,))
 
     def record_retry(self, row_id: int, now: datetime, error: str | None = None) -> None:
+        self.record_retry_after(row_id, now, None, error)
+
+    def record_retry_after(
+        self,
+        row_id: int,
+        now: datetime,
+        delay_seconds: int | None,
+        error: str | None = None,
+    ) -> None:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT attempt_count FROM outbox WHERE id = ?",
@@ -111,7 +120,8 @@ class Outbox:
             if row is None:
                 return
             attempt_count = int(row[0]) + 1
-            delay_seconds = min(3600, 120 * (2 ** (attempt_count - 1)))
+            if delay_seconds is None:
+                delay_seconds = min(3600, 120 * (2 ** (attempt_count - 1)))
             connection.execute(
                 """
                 UPDATE outbox
@@ -126,6 +136,21 @@ class Outbox:
                     row_id,
                 ),
             )
+
+    def pause_delivery(self, reason: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO delivery_state(state_key, state_value, updated_at)
+                VALUES('paused_reason', ?, ?)
+                ON CONFLICT(state_key) DO UPDATE SET state_value = excluded.state_value, updated_at = excluded.updated_at
+                """,
+                (reason, _isoformat(_utcnow())),
+            )
+
+    def resume_delivery(self) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM delivery_state WHERE state_key = 'paused_reason'")
 
     def quarantine(self, row_id: int, error: str) -> None:
         with self._connect() as connection:
@@ -154,11 +179,18 @@ class Outbox:
                 LIMIT 1
                 """
             ).fetchone()
+            paused = connection.execute(
+                "SELECT state_value FROM delivery_state WHERE state_key = 'paused_reason'"
+            ).fetchone()
         return {
             "pending": pending,
             "quarantined": quarantined,
             "delivered": delivered,
             "last_error": row[0] if row else None,
+            "paused": {
+                "active": paused is not None,
+                "reason": paused[0] if paused else None,
+            },
         }
 
     def _initialize(self) -> None:
@@ -183,6 +215,11 @@ class Outbox:
                 CREATE TABLE IF NOT EXISTS delivery_counters (
                     metric TEXT PRIMARY KEY,
                     delivered_count INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS delivery_state (
+                    state_key TEXT PRIMARY KEY,
+                    state_value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
                 """
             )
