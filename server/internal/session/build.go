@@ -17,7 +17,8 @@ const (
 )
 
 type Builder struct {
-	pool *pgxpool.Pool
+	pool                  *pgxpool.Pool
+	afterVersionAllocated func()
 }
 
 type engagementEvent struct {
@@ -39,6 +40,10 @@ func (builder *Builder) Rebuild(ctx context.Context, accountID string) error {
 	}
 	defer tx.Rollback(ctx)
 
+	if err := lockProjectionAccount(ctx, tx, accountID); err != nil {
+		return err
+	}
+
 	events, err := loadEngagementEvents(ctx, tx, accountID)
 	if err != nil {
 		return err
@@ -47,6 +52,9 @@ func (builder *Builder) Rebuild(ctx context.Context, accountID string) error {
 	version, err := nextProjectionVersion(ctx, tx, accountID)
 	if err != nil {
 		return err
+	}
+	if builder.afterVersionAllocated != nil {
+		builder.afterVersionAllocated()
 	}
 
 	latencySessions := buildLatencySessions(events)
@@ -61,6 +69,13 @@ func (builder *Builder) Rebuild(ctx context.Context, accountID string) error {
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit session rebuild transaction: %w", err)
+	}
+	return nil
+}
+
+func lockProjectionAccount(ctx context.Context, tx pgx.Tx, accountID string) error {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", "session_projection_rebuild", accountID); err != nil {
+		return fmt.Errorf("lock session projection account: %w", err)
 	}
 	return nil
 }
