@@ -120,6 +120,87 @@ Result: clean.
 
 ## Review Status
 
-Independent review has not been performed. This report stops at the Task 10
-implementer checkpoint, with the next step being the scoped review checkpoint
-and E2E/docs still deferred exactly as instructed.
+Independent review found one important issue and one minor test-gap:
+- persisted `401/403` authentication pause state was reported in status but not
+  enforced on later `deliver-outbox` runs
+- the UI privacy check scanned source text instead of proving a secret cannot
+  appear in rendered output
+
+## Fix Round 1
+
+Scope remained limited to the Task 10 delivery/UI slice. No Task 11 or E2E/docs
+work was introduced.
+
+`Settings` now derives a hashed delivery pause key from the configured
+service/auth pair, `Outbox` persists that key with paused authentication state
+and clears the pause only when the configured key changes, and
+`DeliveryWorker` short-circuits future delivery runs while the stored pause key
+still matches the current configuration. Successful delivery no longer clears
+an authentication pause implicitly.
+
+The UI privacy test now registers the plugin module with a fake React/PluginApi
+harness, renders the registered route component with a seeded secret inside the
+status payload, and asserts that the rendered markup never contains that secret.
+
+## Fix Round 1 TDD Evidence
+
+### Python RED
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest -q plugin/stashRecommendations/tests/test_delivery.py
+```
+
+Initial result after adding the regression: FAIL, `3 failed, 5 passed`.
+Failures were the intended missing interfaces:
+- `DeliveryWorker.__init__() got an unexpected keyword argument 'pause_key'`
+- `Outbox.pause_delivery() got an unexpected keyword argument 'pause_key'`
+
+These failures proved the current implementation had no persistent auth-pause
+keying or config-change clear path.
+
+### Python GREEN
+
+```bash
+PYTHONPATH=plugin/stashRecommendations pytest -q plugin/stashRecommendations/tests/test_delivery.py
+```
+
+Result after implementation: PASS, `8 passed in 0.08s`.
+
+### UI Characterization
+
+```bash
+node --test tests/ui/recommendations.test.js
+```
+
+The strengthened rendered-output privacy test passed against the existing UI
+behavior, confirming the regression was in test coverage rather than
+production markup exposure. Result after the test upgrade: PASS, `5 passed`.
+
+## Fix Round 1 Verification
+
+```bash
+make test-plugin
+```
+
+Result: PASS, `87 passed in 2.32s`.
+
+```bash
+make test-ui
+```
+
+Result: PASS, `6 passed`.
+
+```bash
+make test-go
+```
+
+Result: PASS, all `server/...` Go packages green.
+
+```bash
+git diff --check
+```
+
+Result: clean.
+
+This report stops again at the Task 10 review checkpoint. Task 11 remains
+untouched.

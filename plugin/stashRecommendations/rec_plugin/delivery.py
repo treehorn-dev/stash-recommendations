@@ -24,19 +24,22 @@ class DeliverySummary:
 
 
 class DeliveryWorker:
-    def __init__(self, outbox: Outbox, service_client: Any) -> None:
+    def __init__(self, outbox: Outbox, service_client: Any, *, pause_key: str | None = None) -> None:
         self._outbox = outbox
         self._service_client = service_client
+        self._pause_key = pause_key
 
     def deliver_ready(self, now: datetime) -> DeliverySummary:
         summary = DeliverySummary()
+        if self._outbox.sync_delivery_pause(self._pause_key):
+            summary.paused = True
+            return summary
         while True:
             item = self._outbox.next_ready(now)
             if item is None:
                 return summary
             outcome = self._deliver_item(item, now)
             if outcome == "ack":
-                self._outbox.resume_delivery()
                 summary.delivered += 1
                 self._outbox.ack(item.row_id)
                 continue
@@ -57,7 +60,7 @@ class DeliveryWorker:
         if response.status_code in (200, 202):
             return "ack"
         if response.status_code in (401, 403):
-            self._outbox.pause_delivery("service authentication failed")
+            self._outbox.pause_delivery("service authentication failed", pause_key=self._pause_key)
             return "pause"
         if response.status_code in (400, 409, 422):
             self._outbox.quarantine(
