@@ -5,9 +5,12 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from rec_plugin.capture import handle_scene_update
 from rec_plugin.outbox import Outbox
+from rec_plugin.source_client import SourceClient
 from rec_plugin.settings import Settings
 from rec_plugin.stash_client import StashClient
+from rec_plugin.sync import SyncState, queue_engagement_sync, queue_metadata_sync, queue_rating_sync
 
 
 PLUGIN_ID = "stashRecommendations"
@@ -30,12 +33,16 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
     args = dict(plugin_input.get("args", {}))
     server_connection = dict(plugin_input.get("server_connection", {}))
     mode = str(args.get("mode", "status"))
-    outbox = Outbox(_plugin_dir(server_connection) / "recommendations.sqlite3")
+    database_path = _plugin_dir(server_connection) / "recommendations.sqlite3"
+    outbox = Outbox(database_path)
     stash = StashClient(server_connection)
+    state = SyncState(database_path)
 
     if mode == "capture-rating":
-        outbox.enqueue_hook("capture-rating", dict(args.get("hookContext", {})))
-        output["output"] = {"queued": 1, "kind": "hook"}
+        output["output"] = {
+            "queued": handle_scene_update(dict(args.get("hookContext", {})), stash, outbox, state),
+            "kind": "rating",
+        }
         return
     if mode == "status":
         plugin_config = stash.plugin_config(PLUGIN_ID)
@@ -45,7 +52,21 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
             "outbox": outbox.status(),
         }
         return
-    if mode in {"sync-ratings", "sync-engagement", "sync-metadata", "deliver-outbox"}:
+    if mode == "sync-ratings":
+        output["output"] = queue_rating_sync(stash, outbox, state, confirmed=bool(args.get("confirmed", False)))
+        return
+    if mode == "sync-engagement":
+        output["output"] = queue_engagement_sync(stash, outbox, state, confirmed=bool(args.get("confirmed", False)))
+        return
+    if mode == "sync-metadata":
+        output["output"] = queue_metadata_sync(
+            stash,
+            outbox,
+            SourceClient(stash.configured_stash_boxes()),
+            confirmed=bool(args.get("confirmed", False)),
+        )
+        return
+    if mode == "deliver-outbox":
         output["output"] = {"queued": 0, "kind": "task", "mode": mode}
         return
     raise ValueError(f"unsupported mode: {mode}")
