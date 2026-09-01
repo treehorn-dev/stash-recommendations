@@ -167,6 +167,7 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 		{name: "source-snapshot.valid.json", valid: true},
 		{name: "source-snapshot.boolean-duration.invalid.json", valid: false},
 		{name: "source-snapshot.scalar-dates.invalid.json", valid: false},
+		{name: "source-snapshot.invalid-date.invalid.json", valid: false},
 		{name: "source-snapshot.nested-null.invalid.json", valid: false},
 		{name: "source-snapshot.boolean-career-years.invalid.json", valid: false},
 	} {
