@@ -20,26 +20,31 @@ Final verification:
 - `node --test tests/ui/*.test.js`: PASS, `1` test.
 - `git diff --check`: clean.
 
-## Fix Round 3
+## Fix Round 3 (Superseded)
 
-Added `003_legacy_api_key_auth`. It marks only the API keys backfilled by
-`002` as legacy and adds a partial index for those rows. New
-`srk_<id>.<secret>` bearers still select one `key_id` row before Argon2id
-verification. Only canonical pre-identifier bearers use a compatibility path,
-which reads and verifies at most `64` `legacy_key` rows and never scans modern
-keys.
+This interim legacy-fallback approach was superseded before Task 3 acceptance.
+It is retained here only as an audit record; pre-identifier keys are not
+usable in the final implementation.
+
+## Fix Round 4
+
+Added `004_revoke_legacy_api_keys`. It stamps every marked legacy row with
+`revoked_at`; only modern `srk_<id>.<secret>` keys with a null revocation time
+can authenticate. Pre-identifier bearer values return `401` and require an
+administrator-issued replacement key. There is no legacy lookup or multi-hash
+request path.
 
 TDD evidence:
 
-- RED: the upgraded legacy-schema test failed because `legacy_key` did not
-  exist after the pre-fix migration run.
-- GREEN: the test seeds an old opaque `srk_` bearer and Argon2 hash, upgrades
-  through all migrations, then authenticates that same bearer to its original
-  account while a newly issued bearer continues to authenticate normally.
+- RED: the upgraded legacy-schema test failed because `revoked_at` was absent.
+- GREEN: the test seeds an old opaque bearer/hash, upgrades through all four
+  migrations, verifies the old bearer is rejected, then verifies a newly
+  issued modern bearer authenticates.
 
 Final verification:
 
 - `POSTGRES_TEST_DSN=postgres://stash_recommendations:stash_recommendations@localhost:5432/stash_recommendations?sslmode=disable go test ./server/... -v`: PASS.
+- `go vet ./server/...`: PASS.
 - `git diff --check`: clean.
 
 ## Fix Round 2
