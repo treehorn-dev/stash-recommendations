@@ -31,6 +31,7 @@ class StashClient:
               findScene(id: $id) {
                 id
                 title
+                rating100
                 stash_ids {
                   endpoint
                   stash_id

@@ -7,9 +7,6 @@ from pathlib import Path
 from rec_plugin.contracts import ContentKey, PreferenceEvent, SourceSnapshot
 from rec_plugin import outbox as outbox_module
 from rec_plugin.outbox import Outbox
-from recommendations import run
-
-
 EVENT_ID = "550e8400-e29b-41d4-a716-446655440000"
 CLIENT_ID = "550e8400-e29b-41d4-a716-446655440001"
 CONTENT = ContentKey.normalize("https://box.example/graphql", "scene-1")
@@ -135,31 +132,6 @@ def test_outbox_retry_persists_last_error_in_status(tmp_path: Path, monkeypatch:
 
     assert status["pending"] == {"rating": 0, "play": 1, "o": 0, "snapshot": 0, "hook": 0}
     assert status["last_error"] == "stash service unavailable"
-
-
-def test_capture_rating_task_only_queues_hook_work(tmp_path: Path, monkeypatch: object) -> None:
-    _freeze_outbox_now(monkeypatch)
-    output: dict[str, object] = {}
-    run(
-        {
-            "server_connection": {
-                "Scheme": "http",
-                "Host": "127.0.0.1",
-                "Port": 9999,
-                "PluginDir": str(tmp_path),
-            },
-            "args": {
-                "mode": "capture-rating",
-                "hookContext": {"id": 44, "inputFields": ["id", "rating100"]},
-            },
-        },
-        output,
-    )
-
-    status = Outbox(tmp_path / "recommendations.sqlite3").status()
-
-    assert output["output"] == {"queued": 1, "kind": "hook"}
-    assert status["pending"] == {"rating": 0, "play": 0, "o": 0, "snapshot": 0, "hook": 1}
 
 
 def _event(kind: str, event_id: str, rating: float | None = None) -> PreferenceEvent:

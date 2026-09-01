@@ -16,6 +16,7 @@ def test_find_scene_uses_local_graphql_and_session_cookie() -> None:
                 "findScene": {
                     "id": "44",
                     "title": "Scene 44",
+                    "rating100": 75,
                     "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-44"}],
                 }
             }
@@ -29,6 +30,7 @@ def test_find_scene_uses_local_graphql_and_session_cookie() -> None:
     scene = client.find_scene(44)
 
     assert scene["id"] == "44"
+    assert scene["rating100"] == 75
     assert calls == [
         (
             "https://stash.local:9999/graphql",
@@ -38,6 +40,7 @@ def test_find_scene_uses_local_graphql_and_session_cookie() -> None:
         )
     ]
     assert "findScene" in calls[0][2]
+    assert "rating100" in calls[0][2]
 
 
 def test_find_scene_returns_none_when_graphql_scene_is_missing() -> None:
