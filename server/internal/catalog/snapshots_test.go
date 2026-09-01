@@ -21,8 +21,9 @@ func TestSnapshotUpsertKeepsNewestSourceVersion(t *testing.T) {
 	service := catalog.NewSnapshotService(repository)
 	ctx := context.Background()
 
-	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T10:00:00Z", "Canonical title")))
-	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T09:00:00Z", "Older title")))
+	// The second client fetches later, but its source object is older.
+	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T11:00:00Z", "2026-08-30T10:00:00Z", "Canonical title")))
+	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T12:00:00Z", "2026-08-30T09:00:00Z", "Older title")))
 
 	scene, found, err := repository.CatalogSource(ctx, domain.ContentKey{
 		Endpoint: "https://box.example/graphql",
@@ -32,9 +33,50 @@ func TestSnapshotUpsertKeepsNewestSourceVersion(t *testing.T) {
 	require.True(t, found)
 	require.Equal(t, "Canonical title", scene.Title)
 
+	var capturedAt, sourceUpdatedAt time.Time
+	require.NoError(t, repository.Pool().QueryRow(ctx, `
+		SELECT captured_at, source_updated_at
+		FROM source_snapshots
+		WHERE endpoint = $1 AND stash_id = $2
+	`, "https://box.example/graphql", "scene-1").Scan(&capturedAt, &sourceUpdatedAt))
+	require.True(t, capturedAt.Equal(mustTime(t, "2026-08-30T11:00:00Z")))
+	require.True(t, sourceUpdatedAt.Equal(mustTime(t, "2026-08-30T10:00:00Z")))
+
 	err = service.Upsert(ctx, snapshotWithExtraField(t, "paths"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "paths")
+}
+
+func mustTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	require.NoError(t, err)
+	return parsed
+}
+
+func TestSnapshotUpsertTreatsEqualSourceVersionsAsNoOpIncludingRelations(t *testing.T) {
+	repository := openSnapshotStore(t)
+	service := catalog.NewSnapshotService(repository)
+	ctx := context.Background()
+
+	require.NoError(t, service.Upsert(ctx, richSnapshotJSON(t, "2026-08-30T11:00:00Z", "2026-08-30T10:00:00Z")))
+	require.NoError(t, service.Upsert(ctx, richSnapshotJSONWithReplacementRelations(t, "2026-08-30T12:00:00Z", "2026-08-30T10:00:00Z")))
+
+	scene, found, err := repository.CatalogSource(ctx, domain.ContentKey{
+		Endpoint: "https://box.example/graphql",
+		StashID:  "scene-1",
+	})
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "Example Scene", scene.Title)
+	require.Equal(t, []catalog.EntityReference{{
+		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "tag-1"},
+		Name:       "Tag",
+	}}, scene.Tags)
+	require.Equal(t, []catalog.EntityReference{{
+		ContentKey: domain.ContentKey{Endpoint: "https://box.example/graphql", StashID: "performer-1"},
+		Name:       "Performer",
+	}}, scene.Performers)
 }
 
 func TestSnapshotUpsertProjectsRelationsAndCanonicalURL(t *testing.T) {
@@ -48,7 +90,7 @@ func TestSnapshotUpsertProjectsRelationsAndCanonicalURL(t *testing.T) {
 	`, "https://box.example/graphql", "https://box.example/scenes/{stash_id}")
 	require.NoError(t, err)
 
-	require.NoError(t, service.Upsert(ctx, richSnapshotJSON(t, "2026-08-30T10:00:00Z")))
+	require.NoError(t, service.Upsert(ctx, richSnapshotJSON(t, "2026-08-30T11:00:00Z", "2026-08-30T10:00:00Z")))
 
 	scene, found, err := repository.CatalogSource(ctx, domain.ContentKey{
 		Endpoint: "https://box.example/graphql",
@@ -107,9 +149,9 @@ func TestSnapshotUpsertIgnoresStaleUpdatesAndAllowsRepeatUpserts(t *testing.T) {
 	service := catalog.NewSnapshotService(repository)
 	ctx := context.Background()
 
-	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T10:00:00Z", "Canonical title")))
-	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T10:00:00Z", "Canonical title")))
-	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T09:00:00Z", "Older title")))
+	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T11:00:00Z", "2026-08-30T10:00:00Z", "Canonical title")))
+	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T12:00:00Z", "2026-08-30T10:00:00Z", "Canonical title")))
+	require.NoError(t, service.Upsert(ctx, snapshotJSON(t, "2026-08-30T13:00:00Z", "2026-08-30T09:00:00Z", "Older title")))
 
 	scene, found, err := repository.CatalogSource(ctx, domain.ContentKey{
 		Endpoint: "https://box.example/graphql",
@@ -161,7 +203,7 @@ func openSnapshotStore(t *testing.T) *store.Store {
 	return repository
 }
 
-func snapshotJSON(t *testing.T, capturedAt string, title string) []byte {
+func snapshotJSON(t *testing.T, capturedAt string, sourceUpdatedAt string, title string) []byte {
 	t.Helper()
 	payload := map[string]any{
 		"schema_version": 1,
@@ -169,7 +211,8 @@ func snapshotJSON(t *testing.T, capturedAt string, title string) []byte {
 			"endpoint": "https://box.example/graphql",
 			"stash_id": "scene-1",
 		},
-		"captured_at": capturedAt,
+		"captured_at":       capturedAt,
+		"source_updated_at": sourceUpdatedAt,
 		"scenes": []map[string]any{{
 			"id":            "scene-1",
 			"title":         title,
@@ -183,7 +226,7 @@ func snapshotJSON(t *testing.T, capturedAt string, title string) []byte {
 	return data
 }
 
-func richSnapshotJSON(t *testing.T, capturedAt string) []byte {
+func richSnapshotJSON(t *testing.T, capturedAt string, sourceUpdatedAt string) []byte {
 	t.Helper()
 	payload := map[string]any{
 		"schema_version": 1,
@@ -191,7 +234,8 @@ func richSnapshotJSON(t *testing.T, capturedAt string) []byte {
 			"endpoint": "https://box.example/graphql",
 			"stash_id": "scene-1",
 		},
-		"captured_at": capturedAt,
+		"captured_at":       capturedAt,
+		"source_updated_at": sourceUpdatedAt,
 		"scenes": []map[string]any{{
 			"id":       "scene-1",
 			"title":    "Example Scene",
@@ -236,6 +280,37 @@ func richSnapshotJSON(t *testing.T, capturedAt string) []byte {
 	return data
 }
 
+func richSnapshotJSONWithReplacementRelations(t *testing.T, capturedAt string, sourceUpdatedAt string) []byte {
+	t.Helper()
+	payload := map[string]any{
+		"schema_version": 1,
+		"content_key": map[string]any{
+			"endpoint": "https://box.example/graphql",
+			"stash_id": "scene-1",
+		},
+		"captured_at":       capturedAt,
+		"source_updated_at": sourceUpdatedAt,
+		"scenes": []map[string]any{{
+			"id":    "scene-1",
+			"title": "Replacement title",
+			"tags": []map[string]any{{
+				"id":   "tag-2",
+				"name": "Replacement tag",
+			}},
+			"performer_appearances": []map[string]any{{
+				"performer_id": "performer-2",
+			}},
+		}},
+		"performers": []map[string]any{{
+			"id":   "performer-2",
+			"name": "Replacement performer",
+		}},
+	}
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+	return data
+}
+
 func snapshotWithExtraField(t *testing.T, field string) []byte {
 	t.Helper()
 	payload := map[string]any{
@@ -244,7 +319,8 @@ func snapshotWithExtraField(t *testing.T, field string) []byte {
 			"endpoint": "https://box.example/graphql",
 			"stash_id": "scene-1",
 		},
-		"captured_at": "2026-08-30T10:00:00Z",
+		"captured_at":       "2026-08-30T10:00:00Z",
+		"source_updated_at": "2026-08-30T10:00:00Z",
 		"scenes": []map[string]any{{
 			"id":    "scene-1",
 			field:   []string{"/private/scene.mp4"},

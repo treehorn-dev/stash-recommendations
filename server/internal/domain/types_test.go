@@ -54,6 +54,7 @@ func TestSourceSnapshotDecodeRejectsPrivacyFields(t *testing.T) {
 				"schema_version": 1,
 				"content_key": {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
 				"captured_at": "2026-08-30T00:00:00Z",
+				"source_updated_at": "2026-08-30T00:00:00Z",
 				"scenes": [{"id": "scene-1", "`+field+`": "private"}],
 				"performers": []
 			}`), &snapshot)
@@ -171,6 +172,7 @@ func TestV1FixturesHaveCrossLanguageContractParity(t *testing.T) {
 		valid bool
 	}{
 		{name: "source-snapshot.valid.json", valid: true},
+		{name: "source-snapshot.missing-source-updated-at.invalid.json", valid: false},
 		{name: "source-snapshot.boolean-duration.invalid.json", valid: false},
 		{name: "source-snapshot.scalar-dates.invalid.json", valid: false},
 		{name: "source-snapshot.invalid-date.invalid.json", valid: false},

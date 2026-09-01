@@ -3,11 +3,12 @@
   "title": "Stash Recommendations Source Snapshot V1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "content_key", "captured_at", "scenes", "performers"],
+  "required": ["schema_version", "content_key", "captured_at", "source_updated_at", "scenes", "performers"],
   "properties": {
     "schema_version": {"const": 1},
     "content_key": {"$ref": "#/$defs/content_key"},
     "captured_at": {"type": "string", "format": "date-time"},
+    "source_updated_at": {"type": "string", "format": "date-time"},
     "scenes": {"type": "array", "items": {"$ref": "#/$defs/scene"}},
     "performers": {"type": "array", "items": {"$ref": "#/$defs/performer"}}
   },

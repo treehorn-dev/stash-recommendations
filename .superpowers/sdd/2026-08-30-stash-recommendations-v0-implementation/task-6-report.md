@@ -162,7 +162,27 @@ git diff --check
 
 - PostgreSQL-backed verification required escalated local access because the
   sandbox could not connect to `localhost:5432`.
-- The v1 snapshot contract still exposes only `captured_at`, not a separate
-  source-update timestamp. This implementation therefore uses `captured_at` as
-  the authoritative stale/update ordering value and persists it into
-  `source_snapshots.source_updated_at` and the projected source rows.
+
+## Fix Round 1
+
+The v1 contract now requires a distinct `source_updated_at` timestamp. The
+server persists `captured_at` as fetch time and uses only `source_updated_at`
+for snapshot and projection freshness. Older and equal source versions return
+before any field or relation mutation, making equal deliveries idempotent no-
+ops. Added shared Go/Python fixture coverage for a missing source version and
+PostgreSQL regression coverage for delayed delivery, separate persisted times,
+and equal-version relation replacement.
+
+TDD evidence: the new catalog tests were added before the contract/storage
+change; the prior implementation rejected their new contract field and used
+capture time for freshness. The full server rerun initially exposed only a
+test-location comparison issue, corrected by comparing timestamp instants.
+
+Verification after the fix:
+
+```text
+POSTGRES_TEST_DSN=... go test ./server/... -v: PASS
+PYTHONPATH=plugin/stashRecommendations pytest plugin/stashRecommendations/tests -q: 47 passed
+node --test tests/ui/*.test.js: 1 passed
+git diff --check: clean
+```

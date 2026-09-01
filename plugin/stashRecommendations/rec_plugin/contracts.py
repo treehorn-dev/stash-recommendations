@@ -82,6 +82,7 @@ class SourceSnapshot:
     captured_at: datetime
     scenes: list[dict[str, Any]]
     performers: list[dict[str, Any]]
+    source_updated_at: Optional[datetime] = None
 
     def __post_init__(self) -> None:
         self.validate()
@@ -91,6 +92,8 @@ class SourceSnapshot:
             raise ValueError("schema_version must be 1")
         if not isinstance(self.captured_at, datetime) or self.captured_at.tzinfo is None:
             raise ValueError("captured_at must be timezone-aware")
+        if not isinstance(self.source_updated_at, datetime) or self.source_updated_at.tzinfo is None:
+            raise ValueError("source_updated_at must be timezone-aware")
         self.content_key = ContentKey.normalize(self.content_key.endpoint, self.content_key.stash_id)
         if not isinstance(self.scenes, list) or not isinstance(self.performers, list):
             raise ValueError("scenes and performers must be arrays")
@@ -103,6 +106,7 @@ class SourceSnapshot:
         self.validate()
         payload = asdict(self)
         payload["captured_at"] = self.captured_at.isoformat().replace("+00:00", "Z")
+        payload["source_updated_at"] = self.source_updated_at.isoformat().replace("+00:00", "Z")
         return payload
 
 

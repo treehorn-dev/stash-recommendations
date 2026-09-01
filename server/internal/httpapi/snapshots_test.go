@@ -37,7 +37,7 @@ func TestPostSnapshotsRejectsMalformedAndUnauthenticatedRequests(t *testing.T) {
 		SnapshotService:   catalog.NewSnapshotService(repository),
 	})
 
-	recorder := postSnapshot(handler, account.PlaintextKey, []byte(`{"schema_version":1,"content_key":{"endpoint":"https://box.example/graphql","stash_id":"scene-1"},"captured_at":"2026-08-30T10:00:00Z","scenes":[{"id":"scene-1","paths":["/private/scene.mp4"]}],"performers":[]}`))
+	recorder := postSnapshot(handler, account.PlaintextKey, []byte(`{"schema_version":1,"content_key":{"endpoint":"https://box.example/graphql","stash_id":"scene-1"},"captured_at":"2026-08-30T10:00:00Z","source_updated_at":"2026-08-30T10:00:00Z","scenes":[{"id":"scene-1","paths":["/private/scene.mp4"]}],"performers":[]}`))
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 
 	recorder = postSnapshot(handler, "", snapshotRequestJSON(t, "2026-08-30T10:00:00Z", "Example Scene"))
@@ -65,7 +65,8 @@ func snapshotRequestJSON(t *testing.T, capturedAt string, title string) []byte {
 			"endpoint": "https://box.example/graphql",
 			"stash_id": "scene-1",
 		},
-		"captured_at": capturedAt,
+		"captured_at":       capturedAt,
+		"source_updated_at": capturedAt,
 		"scenes": []map[string]any{{
 			"id":    "scene-1",
 			"title": title,
