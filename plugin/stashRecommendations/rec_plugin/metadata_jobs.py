@@ -13,6 +13,8 @@ class MetadataJobs:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS metadata_jobs (endpoint TEXT NOT NULL, stash_id TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY(endpoint, stash_id))"
             )
+            # A previous plugin task may have stopped after claiming jobs.
+            connection.execute("UPDATE metadata_jobs SET state = 'pending' WHERE state = 'in_progress'")
 
     def enqueue(self, endpoint: str, stash_id: str) -> None:
         key = ContentKey.normalize(endpoint, stash_id)

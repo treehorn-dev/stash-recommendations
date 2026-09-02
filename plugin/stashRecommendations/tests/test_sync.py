@@ -192,6 +192,25 @@ def test_metadata_sync_claims_every_pending_scene_by_default(tmp_path: Path) -> 
     assert inspect.signature(queue_metadata_sync).parameters["batch_size"].default is None
 
 
+def test_metadata_jobs_recover_interrupted_claims_on_next_run(tmp_path: Path) -> None:
+    database_path = tmp_path / "recommendations.sqlite3"
+    jobs = MetadataJobs(database_path)
+    jobs.enqueue("https://box.example/graphql", "scene-1")
+    jobs.enqueue("https://box.example/graphql", "scene-2")
+    assert jobs.claim() == [
+        ("https://box.example/graphql", "scene-1"),
+        ("https://box.example/graphql", "scene-2"),
+    ]
+
+    recovered = MetadataJobs(database_path)
+
+    assert recovered.status() == {"pending": 2, "in_progress": 0, "completed": 0, "failed": 0}
+    assert recovered.claim() == [
+        ("https://box.example/graphql", "scene-1"),
+        ("https://box.example/graphql", "scene-2"),
+    ]
+
+
 def test_queue_metadata_sync_deduplicates_keys_and_queues_only_configured_sources(tmp_path: Path) -> None:
     database_path = tmp_path / "recommendations.sqlite3"
     stash = FakeStash(
