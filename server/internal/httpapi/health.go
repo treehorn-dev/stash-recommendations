@@ -1,6 +1,9 @@
 package httpapi
 
-import "net/http"
+import (
+	"log"
+	"net/http"
+)
 
 // NewMux provides the service's HTTP routes.
 func NewMux(deps ...Dependencies) http.Handler {
@@ -21,5 +24,5 @@ func NewMux(deps ...Dependencies) http.Handler {
 			mux.Handle("GET /v1/recommendations/for-you", RequireAccount(deps[0].AccountRepository)(GetForYou(deps[0].RecommendationReader)))
 		}
 	}
-	return mux
+	return AccessLog(mux, log.Default())
 }

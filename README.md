@@ -142,15 +142,15 @@ remote package-list URL:
 
 In Stash plugin settings for `stashRecommendations`, configure:
 
-- `service_url`: public HTTPS base URL for the service
+- `service_url`: public HTTPS base URL, or an opted-in private/Tailnet HTTP URL
 - `api_key`: the issued recommendation API key
 - `show_remote_results`: optional remote-only recommendation links
+- `allow_private_http`: allow HTTP only for loopback, private, or Tailnet IP addresses
 
 The raw plugin exposes these tasks:
 
-- `sync-ratings`: preview and enqueue a full explicit rating sync
-- `sync-engagement`: preview and enqueue recorded `play_history` and `o_history`
-- `sync-metadata`: preview and enqueue Stash-box scene and performer snapshots
+- `sync-ratings`, `sync-engagement`, `sync-metadata`: preview the respective sync
+- `sync-ratings-confirmed`, `sync-engagement-confirmed`, `sync-metadata-confirmed`: queue the respective sync
 - `deliver-outbox`: send pending events and snapshots to the service
 - `status`: show configuration and outbox state
 
@@ -158,9 +158,8 @@ The rating hook is `capture-rating` on `Scene.Update.Post`.
 
 ## Explicit Sync and Status
 
-`sync-ratings`, `sync-engagement`, and `sync-metadata` all require confirmation
-before enqueueing work. `deliver-outbox` is independent: hooks and sync steps
-write SQLite only, and delivery happens later.
+The `*-confirmed` tasks enqueue work. `deliver-outbox` is independent: hooks
+and sync steps write SQLite only, and delivery happens later.
 
 `status` reports:
 
@@ -171,6 +170,12 @@ write SQLite only, and delivery happens later.
 - `outbox.pending`, `outbox.delivered`, `outbox.quarantined`
 - `outbox.last_error`
 - `outbox.paused.active` and `outbox.paused.reason`
+- `outbox.last_delivery_attempt`
+
+Each delivery attempt is also appended as a redacted JSON line to
+`recommendations.delivery.log` in the installed plugin directory. The log
+records outcome, HTTP status, and error text, but never API keys or request
+payloads.
 
 ## Privacy Boundary
 

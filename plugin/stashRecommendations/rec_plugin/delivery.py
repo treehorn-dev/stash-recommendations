@@ -56,16 +56,24 @@ class DeliveryWorker:
             response = self._send(item)
         except OSError as error:
             self._outbox.record_retry(item.row_id, now, str(error))
+            self._outbox.record_delivery_attempt(item, now, "retry", error=str(error))
             return "retry"
         if response.status_code in (200, 202):
+            self._outbox.record_delivery_attempt(item, now, "delivered", status_code=response.status_code)
             return "ack"
         if response.status_code in (401, 403):
             self._outbox.pause_delivery("service authentication failed", pause_key=self._pause_key)
+            self._outbox.record_delivery_attempt(
+                item, now, "paused", status_code=response.status_code, error=response.error
+            )
             return "pause"
         if response.status_code in (400, 409, 422):
             self._outbox.quarantine(
                 item.row_id,
                 response.error or f"service rejected payload with status {response.status_code}",
+            )
+            self._outbox.record_delivery_attempt(
+                item, now, "quarantined", status_code=response.status_code, error=response.error
             )
             return "quarantine"
         if response.status_code == 429:
@@ -75,12 +83,14 @@ class DeliveryWorker:
                 response.retry_after_seconds,
                 response.error or "service rate limited",
             )
+            self._outbox.record_delivery_attempt(item, now, "retry", status_code=response.status_code, error=response.error)
             return "retry"
         self._outbox.record_retry(
             item.row_id,
             now,
             response.error or f"service unavailable ({response.status_code})",
         )
+        self._outbox.record_delivery_attempt(item, now, "retry", status_code=response.status_code, error=response.error)
         return "retry"
 
     def _send(self, item: OutboxItem) -> ServiceResponse:
