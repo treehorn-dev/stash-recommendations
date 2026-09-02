@@ -54,6 +54,16 @@ def test_queue_rating_sync_requires_confirmation_before_enqueueing(tmp_path: Pat
     assert [payload["sequence"] for payload in payloads] == [1, 2, 3]
 
 
+def test_sync_state_reserves_sequences_in_one_transaction(tmp_path: Path) -> None:
+    state = SyncState(tmp_path / "recommendations.sqlite3", client_id_factory=lambda: CLIENT_ID)
+
+    client_id, sequences = state.reserve_sequences(3)
+
+    assert client_id == CLIENT_ID
+    assert sequences == [1, 2, 3]
+    assert state.next_sequence() == 4
+
+
 def test_queue_engagement_sync_imports_only_new_history_with_stable_identity(tmp_path: Path) -> None:
     database_path = tmp_path / "recommendations.sqlite3"
     stash = FakeStash(

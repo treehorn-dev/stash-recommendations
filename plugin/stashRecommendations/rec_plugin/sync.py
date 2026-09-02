@@ -50,6 +50,17 @@ class SyncState:
             )
             return sequence
 
+    def reserve_sequences(self, count: int) -> tuple[str, list[int]]:
+        with self._connect() as connection:
+            row = connection.execute("SELECT client_id, next_sequence FROM sync_identity WHERE singleton = 1").fetchone()
+            if row is None:
+                client_id, first = str(self._client_id_factory()), 1
+                connection.execute("INSERT INTO sync_identity(singleton, client_id, next_sequence) VALUES(1, ?, ?)", (client_id, first + count))
+            else:
+                client_id, first = str(row[0]), int(row[1])
+                connection.execute("UPDATE sync_identity SET next_sequence = ? WHERE singleton = 1", (first + count,))
+        return client_id, list(range(first, first + count))
+
     def has_history_event(self, event_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -90,12 +101,13 @@ def queue_rating_sync(stash: Any, outbox: Outbox, state: SyncState, *, confirmed
     event_count = sum(len(list(_scene_content_keys(scene))) for scene in scenes)
     if not confirmed:
         return {"requires_confirmation": True, "count": event_count, "kind": "rating-sync"}
+    client_id, sequences = state.reserve_sequences(event_count)
+    sequence_iter = iter(sequences)
     events = []
     occurred_at = _utcnow()
     for scene in scenes:
-        events.extend(build_rating_events(scene, state, origin="sync-ratings", occurred_at=occurred_at))
-    for event in events:
-        outbox.enqueue(event)
+        events.extend(build_rating_events(scene, state, origin="sync-ratings", occurred_at=occurred_at, client_id=client_id, next_sequence=lambda: next(sequence_iter)))
+    outbox.enqueue_many(events)
     return {"queued": len(events), "kind": "rating-sync"}
 
 
@@ -143,6 +155,8 @@ def build_rating_events(
     *,
     origin: str,
     occurred_at: datetime | None = None,
+    client_id: str | None = None,
+    next_sequence: callable | None = None,
 ) -> list[PreferenceEvent]:
     occurred = (occurred_at or _utcnow()).astimezone(timezone.utc)
     rating_value = scene.get("rating100")
@@ -152,14 +166,15 @@ def build_rating_events(
     else:
         kind = "scene.rating.remove"
         rating = None
-    client_id = state.client_id
+    client_id = client_id or state.client_id
+    next_sequence = next_sequence or state.next_sequence
     events: list[PreferenceEvent] = []
     for key in _scene_content_keys(scene):
         event = PreferenceEvent(
             schema_version=1,
             event_id=str(uuid4()),
             client_id=client_id,
-            sequence=state.next_sequence(),
+            sequence=next_sequence(),
             occurred_at=occurred,
             content_key=key,
             kind=kind,
