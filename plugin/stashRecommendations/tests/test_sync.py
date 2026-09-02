@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import inspect
 import json
 from pathlib import Path
 import socket
@@ -9,8 +10,15 @@ from typing import Any
 from urllib import error
 
 from rec_plugin.outbox import Outbox
+from rec_plugin.metadata_jobs import MetadataJobs
 from rec_plugin.source_client import HTTP_TIMEOUT_SECONDS, SourceClient
-from rec_plugin.sync import SyncState, build_history_event_id, queue_engagement_sync, queue_metadata_sync, queue_rating_sync
+from rec_plugin.sync import (
+    SyncState,
+    build_history_event_id,
+    queue_engagement_sync,
+    queue_metadata_sync,
+    queue_rating_sync,
+)
 from recommendations import run
 
 
@@ -170,6 +178,18 @@ def test_build_history_event_id_varies_by_client_id() -> None:
     )
 
     assert first != second
+
+
+def test_metadata_sync_claims_every_pending_scene_by_default(tmp_path: Path) -> None:
+    jobs = MetadataJobs(tmp_path / "recommendations.sqlite3")
+    jobs.enqueue("https://box.example/graphql", "scene-2")
+    jobs.enqueue("https://box.example/graphql", "scene-1")
+
+    assert jobs.claim() == [
+        ("https://box.example/graphql", "scene-1"),
+        ("https://box.example/graphql", "scene-2"),
+    ]
+    assert inspect.signature(queue_metadata_sync).parameters["batch_size"].default is None
 
 
 def test_queue_metadata_sync_deduplicates_keys_and_queues_only_configured_sources(tmp_path: Path) -> None:

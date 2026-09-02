@@ -26,13 +26,18 @@ class MetadataJobs:
                 (key.endpoint, key.stash_id),
             )
 
-    def claim(self, limit: int) -> list[tuple[str, str]]:
-        if limit <= 0:
+    def claim(self, limit: int | None = None) -> list[tuple[str, str]]:
+        if limit is not None and limit <= 0:
             return []
         with connect(self._path) as connection:
-            rows = connection.execute(
-                "SELECT endpoint, stash_id FROM metadata_jobs WHERE state = 'pending' ORDER BY endpoint, stash_id LIMIT ?", (limit,)
-            ).fetchall()
+            if limit is None:
+                rows = connection.execute(
+                    "SELECT endpoint, stash_id FROM metadata_jobs WHERE state = 'pending' ORDER BY endpoint, stash_id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT endpoint, stash_id FROM metadata_jobs WHERE state = 'pending' ORDER BY endpoint, stash_id LIMIT ?", (limit,)
+                ).fetchall()
             connection.executemany("UPDATE metadata_jobs SET state = 'in_progress' WHERE endpoint = ? AND stash_id = ?", rows)
         return [(str(row[0]), str(row[1])) for row in rows]
 

@@ -13,9 +13,6 @@ from rec_plugin.metadata_jobs import MetadataJobs
 from rec_plugin.outbox import Outbox
 from rec_plugin.snapshots import to_source_snapshot
 
-DEFAULT_METADATA_SYNC_BATCH_SIZE = 50
-
-
 class SyncState:
     def __init__(self, path: Path, *, client_id_factory: callable | None = None) -> None:
         self._path = path
@@ -143,7 +140,7 @@ def queue_metadata_sync(
     source: Any,
     *,
     confirmed: bool,
-    batch_size: int = DEFAULT_METADATA_SYNC_BATCH_SIZE,
+    batch_size: int | None = None,
 ) -> dict[str, Any]:
     keys = list(_configured_content_keys(stash, source))
     if not confirmed:
