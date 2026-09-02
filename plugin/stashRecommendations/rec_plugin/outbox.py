@@ -50,6 +50,21 @@ class Outbox:
             return
         raise TypeError(f"unsupported outbox item: {type(item)!r}")
 
+    def enqueue_many(self, items: list[PreferenceEvent | SourceSnapshot]) -> None:
+        now = _utcnow()
+        with self._connect() as connection:
+            for item in items:
+                if isinstance(item, PreferenceEvent):
+                    event_id, item_type, metric, payload = item.event_id, "preference_event", _metric_for_event(item.kind), item.to_dict()
+                elif isinstance(item, SourceSnapshot):
+                    event_id, item_type, metric, payload = None, "source_snapshot", "snapshot", item.to_dict()
+                else:
+                    raise TypeError(f"unsupported outbox item: {type(item)!r}")
+                connection.execute(
+                    "INSERT INTO outbox(event_id, item_type, metric, payload_json, attempt_count, next_attempt_at, state, updated_at) VALUES(?, ?, ?, ?, 0, ?, ?, ?)",
+                    (event_id, item_type, metric, json.dumps(payload, sort_keys=True), _isoformat(now), STATE_PENDING, _isoformat(now)),
+                )
+
     def enqueue_hook(self, hook_name: str, hook_context: dict[str, Any]) -> None:
         self._insert_row(
             event_id=None,
