@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from rec_plugin.settings import Settings
 
@@ -92,3 +93,13 @@ def test_manifest_declares_raw_python_tasks_hook_and_settings() -> None:
     assert "status" in text
     assert "capture-rating" in text
     assert "Scene.Update.Post" in text
+
+
+def test_manifest_declares_confirmed_sync_tasks() -> None:
+    manifest = Path(__file__).resolve().parents[1] / "stashRecommendations.yml"
+    tasks = yaml.safe_load(manifest.read_text())["tasks"]
+    defaults = {task["name"]: task["defaultArgs"] for task in tasks}
+
+    assert defaults["sync-ratings-confirmed"] == {"mode": "sync-ratings", "confirmed": True}
+    assert defaults["sync-engagement-confirmed"] == {"mode": "sync-engagement", "confirmed": True}
+    assert defaults["sync-metadata-confirmed"] == {"mode": "sync-metadata", "confirmed": True}

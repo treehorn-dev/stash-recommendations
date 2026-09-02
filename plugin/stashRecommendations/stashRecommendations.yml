@@ -28,17 +28,32 @@ settings:
     type: BOOLEAN
 tasks:
   - name: sync-ratings
+    description: Preview a full sync of explicit ratings from local Stash.
+    defaultArgs:
+      mode: sync-ratings
+  - name: sync-ratings-confirmed
     description: Queue a full sync of explicit ratings from local Stash.
     defaultArgs:
       mode: sync-ratings
+      confirmed: true
   - name: sync-engagement
+    description: Preview a full sync of recorded play and o history from local Stash.
+    defaultArgs:
+      mode: sync-engagement
+  - name: sync-engagement-confirmed
     description: Queue a full sync of recorded play and o history from local Stash.
     defaultArgs:
       mode: sync-engagement
+      confirmed: true
   - name: sync-metadata
+    description: Preview a metadata sync for configured Stash-box sources.
+    defaultArgs:
+      mode: sync-metadata
+  - name: sync-metadata-confirmed
     description: Queue a metadata sync for configured Stash-box sources.
     defaultArgs:
       mode: sync-metadata
+      confirmed: true
   - name: deliver-outbox
     description: Deliver pending recommendation events and snapshots.
     defaultArgs:
