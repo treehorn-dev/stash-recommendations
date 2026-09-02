@@ -46,15 +46,58 @@ func (b *Builder) BuildAndActivate(ctx context.Context) (string, error) {
 func buildVectorProjection(catalog []CatalogScene, ratings []Rating, sessions []Session, oWeight float64) VectorProjection {
 	sort.Slice(catalog, func(i, j int) bool { return contentKeyLess(catalog[i].ContentKey, catalog[j].ContentKey) })
 	projection := VectorProjection{}
-	sceneVectors := make(map[domain.ContentKey][]float32, len(catalog))
+	contentVectors := make(map[domain.ContentKey][]float32, len(catalog))
 	for _, scene := range catalog {
 		vector, ok := SceneVector(scene.Features)
 		if !ok {
 			continue
 		}
-		projection.SceneVectors = append(projection.SceneVectors, SceneEmbedding{ContentKey: scene.ContentKey, Embedding: vector})
-		sceneVectors[scene.ContentKey] = vector
+		contentVectors[scene.ContentKey] = vector
 	}
+	behaviorVectors := map[domain.ContentKey][]float32{}
+	for _, session := range sessions {
+		sessionSum := make([]float32, sceneVectorDimensions)
+		anchors := make([][]float32, len(session.Items))
+		weights := make([]float64, len(session.Items))
+		for index, item := range session.Items {
+			anchor := contentVectors[item.ContentKey]
+			if anchor == nil {
+				anchor, _ = SceneVector([]string{"scene:" + item.ContentKey.Endpoint + ":" + item.ContentKey.StashID})
+			}
+			anchors[index] = anchor
+			weights[index] = eventWeight(item.Kind, oWeight)
+			for dimension, value := range anchor {
+				sessionSum[dimension] += value * float32(weights[index])
+			}
+		}
+		for index, item := range session.Items {
+			if behaviorVectors[item.ContentKey] == nil {
+				behaviorVectors[item.ContentKey] = make([]float32, sceneVectorDimensions)
+			}
+			for dimension, value := range sessionSum {
+				behaviorVectors[item.ContentKey][dimension] += value - anchors[index][dimension]*float32(weights[index])
+			}
+		}
+	}
+	sceneVectors := map[domain.ContentKey][]float32{}
+	keys := map[domain.ContentKey]struct{}{}
+	for key := range contentVectors {
+		keys[key] = struct{}{}
+	}
+	for key := range behaviorVectors {
+		keys[key] = struct{}{}
+	}
+	for key := range keys {
+		vector, ok := combineVectors(contentVectors[key], behaviorVectors[key])
+		if !ok {
+			continue
+		}
+		sceneVectors[key] = vector
+		projection.SceneVectors = append(projection.SceneVectors, SceneEmbedding{ContentKey: key, Embedding: vector})
+	}
+	sort.Slice(projection.SceneVectors, func(i, j int) bool {
+		return contentKeyLess(projection.SceneVectors[i].ContentKey, projection.SceneVectors[j].ContentKey)
+	})
 
 	interactions := map[string][]WeightedInteraction{}
 	reasons := map[string]map[string]struct{}{}

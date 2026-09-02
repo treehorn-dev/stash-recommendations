@@ -153,6 +153,25 @@ func TestBuildVectorProjectionBuildsOneProfileFromSessionizedBehavior(t *testing
 	}
 }
 
+func TestBuildVectorProjectionOuterJoinsMetadataAndSessionScenes(t *testing.T) {
+	metadata := domain.ContentKey{Endpoint: "https://box.example", StashID: "metadata"}
+	behavioral := domain.ContentKey{Endpoint: "https://box.example", StashID: "behavioral"}
+
+	projection := buildVectorProjection(
+		[]CatalogScene{{ContentKey: metadata, Features: []string{"tag:https://box.example:tag"}}},
+		nil,
+		[]Session{{AccountID: "account", Items: []SessionItem{{ContentKey: metadata, Kind: "scene.played"}, {ContentKey: behavioral, Kind: "scene.o"}}}},
+		DefaultOWeight,
+	)
+
+	if len(projection.SceneVectors) != 2 {
+		t.Fatalf("expected metadata and behavioral scenes, got %d vectors", len(projection.SceneVectors))
+	}
+	if similarity(projection.SceneVectors[0].Embedding, projection.SceneVectors[1].Embedding) <= 0 {
+		t.Fatal("expected behavioral-only scene to inherit session context")
+	}
+}
+
 func similarity(left, right []float32) float64 {
 	var total float64
 	for index := range left {
