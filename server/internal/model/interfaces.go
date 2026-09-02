@@ -41,20 +41,42 @@ type CatalogCandidate struct {
 	Reason    string
 }
 
+// CatalogScene is a source scene with its normalized Stash-box feature tokens.
+type CatalogScene struct {
+	ContentKey domain.ContentKey
+	Features   []string
+}
+
+type SceneEmbedding struct {
+	ContentKey domain.ContentKey
+	Embedding  []float32
+}
+
+type AccountProfile struct {
+	AccountID string
+	Embedding []float32
+	Reasons   []string
+}
+
+type VectorProjection struct {
+	SceneVectors []SceneEmbedding
+	Profiles     []AccountProfile
+}
+
 // InteractionSource supplies the current rating and session projections to a batch build.
 type InteractionSource interface {
 	CurrentRatings(context.Context) ([]Rating, error)
 	CurrentSessions(context.Context) ([]Session, error)
 }
 
-// CatalogSource supplies candidates derived from validated catalog projections.
+// CatalogSource supplies source scenes with normalized Stash-box metadata.
 type CatalogSource interface {
-	CatalogCandidates(context.Context) ([]CatalogCandidate, error)
+	CatalogScenes(context.Context) ([]CatalogScene, error)
 }
 
-// RecommendationStore atomically persists an inactive projection and activates it only when complete.
+// RecommendationStore atomically persists an inactive vector projection and activates it only when complete.
 type RecommendationStore interface {
-	SaveAndActivate(context.Context, Projection) (string, error)
+	SaveAndActivateVectors(context.Context, VectorProjection) (string, error)
 }
 
 // Reader serves recommendations from the active model version.

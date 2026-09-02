@@ -14,14 +14,14 @@ import (
 	"github.com/treehorn/stash-recommendations/server/internal/store"
 )
 
-func TestBuildPreservesBehavioralRecommendationsWithoutCatalogMetadata(t *testing.T) {
+func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
 
 	account := seedModelAccount(t, pool)
-	otherAccount := seedModelAccount(t, pool)
+	seedSharedPerformer(t, pool, "scene-a", "scene-b")
 	seedLatestLatencySession(t, pool, account, []sessionSeed{{"scene-a", "scene.played"}})
-	seedLatestLatencySession(t, pool, otherAccount, []sessionSeed{{"scene-a", "scene.played"}, {"scene-b", "scene.o"}})
+	seedRating(t, pool, account, "scene-a", 1)
 
 	versionID, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
@@ -30,68 +30,15 @@ func TestBuildPreservesBehavioralRecommendationsWithoutCatalogMetadata(t *testin
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
 	require.Equal(t, []string{"scene-b"}, recommendationIDs(items))
-	require.Contains(t, reasonsFor(items, "scene-b"), "session_cooccurrence")
+	require.Contains(t, reasonsFor(items, "scene-b"), "content_similarity")
 	require.Nil(t, items[0].CanonicalURL)
 
 	forYou, activeVersion, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
-	require.Equal(t, []string{"scene-b"}, recommendationIDs(forYou))
-	require.Contains(t, reasonsFor(forYou, "scene-b"), "session_cooccurrence")
-	require.Nil(t, forYou[0].CanonicalURL)
-}
-
-func TestCollaborativeSimilarityIsMeanCenteredNormalizedAndShrunk(t *testing.T) {
-	ratings := []Rating{
-		{AccountID: "account-1", ContentKey: contentKey("scene-a"), Value: 1},
-		{AccountID: "account-1", ContentKey: contentKey("scene-b"), Value: 1},
-		{AccountID: "account-1", ContentKey: contentKey("scene-c"), Value: 0},
-		{AccountID: "account-2", ContentKey: contentKey("scene-a"), Value: 1},
-		{AccountID: "account-2", ContentKey: contentKey("scene-b"), Value: 1},
-		{AccountID: "account-2", ContentKey: contentKey("scene-c"), Value: 0},
-		{AccountID: "account-3", ContentKey: contentKey("scene-a"), Value: 1},
-		{AccountID: "account-3", ContentKey: contentKey("scene-d"), Value: 1},
-		{AccountID: "account-3", ContentKey: contentKey("scene-c"), Value: 0},
-	}
-
-	scores := collaborativeNeighborScores(ratings)
-	require.InDelta(t, 0.5, scores[contentKey("scene-a")][contentKey("scene-b")], 1e-12)
-	require.InDelta(t, 1.0/3.0, scores[contentKey("scene-a")][contentKey("scene-d")], 1e-12)
-	require.Greater(t, scores[contentKey("scene-a")][contentKey("scene-b")], scores[contentKey("scene-a")][contentKey("scene-d")])
-}
-
-func TestBuildProjectionIsDeterministicForInputOrder(t *testing.T) {
-	inputs := []Rating{
-		{AccountID: "b", ContentKey: contentKey("scene-a"), Value: 1}, {AccountID: "b", ContentKey: contentKey("scene-b"), Value: 1}, {AccountID: "b", ContentKey: contentKey("scene-c"), Value: 0},
-		{AccountID: "a", ContentKey: contentKey("scene-a"), Value: 1}, {AccountID: "a", ContentKey: contentKey("scene-b"), Value: 1}, {AccountID: "a", ContentKey: contentKey("scene-c"), Value: 0},
-	}
-	first := NewBuilder(nil, DefaultOWeight).buildProjection(inputs, nil, nil)
-	for index := 0; index < 20; index++ {
-		reversed := append([]Rating(nil), inputs...)
-		for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
-			reversed[left], reversed[right] = reversed[right], reversed[left]
-		}
-		actual := NewBuilder(nil, DefaultOWeight).buildProjection(reversed, nil, nil)
-		require.Equal(t, first, actual)
-	}
-}
-
-func TestForYouTreatsZeroRatingAsKnownContent(t *testing.T) {
-	repository, pool := openModelTestStore(t)
-	ctx := context.Background()
-	account := seedModelAccount(t, pool)
-	other := seedModelAccount(t, pool)
-	seedCatalogedScenes(t, pool, "scene-a", "scene-b")
-	seedRating(t, pool, account, "scene-a", 1)
-	seedRating(t, pool, account, "scene-b", 0)
-	seedRating(t, pool, other, "scene-a", 1)
-	seedRating(t, pool, other, "scene-b", 1)
-
-	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
-	require.NoError(t, err)
-	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
-	require.NoError(t, err)
-	require.Empty(t, items)
+	require.Contains(t, recommendationIDs(forYou), "scene-b")
+	require.Contains(t, reasonsFor(forYou, "scene-b"), "rating_profile")
+	require.Contains(t, reasonsFor(forYou, "scene-b"), "play_profile")
 }
 
 func TestCatalogCandidatesIncludeValidatedSceneAttributes(t *testing.T) {
@@ -141,24 +88,22 @@ func TestFailedBuildKeepsActiveVersion(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
 	accountID := seedModelAccount(t, pool)
-	seedCatalogedScenes(t, pool, "scene-a", "scene-b", "scene-c")
+	seedSharedPerformer(t, pool, "scene-a", "scene-b")
 	seedRating(t, pool, accountID, "scene-a", 1)
-	seedRating(t, pool, accountID, "scene-b", 1)
-	seedRating(t, pool, accountID, "scene-c", 0)
 
 	builder := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight)
 	activeVersion, err := builder.BuildAndActivate(ctx)
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
-		CREATE FUNCTION fail_model_neighbor_insert() RETURNS trigger AS $$
+	CREATE FUNCTION fail_model_vector_insert() RETURNS trigger AS $$
 		BEGIN
 			RAISE EXCEPTION 'forced model build failure';
 		END;
 		$$ LANGUAGE plpgsql;
-		CREATE TRIGGER fail_model_neighbor_insert
-		BEFORE INSERT ON item_neighbors
-		FOR EACH ROW EXECUTE FUNCTION fail_model_neighbor_insert();
+	CREATE TRIGGER fail_model_vector_insert
+	BEFORE INSERT ON model_scene_vectors
+	FOR EACH ROW EXECUTE FUNCTION fail_model_vector_insert();
 	`)
 	require.NoError(t, err)
 

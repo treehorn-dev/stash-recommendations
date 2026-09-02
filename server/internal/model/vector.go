@@ -5,10 +5,26 @@ import (
 	"encoding/binary"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/treehorn/stash-recommendations/server/internal/domain"
 )
 
 const sceneVectorDimensions = 256
+
+type WeightedInteraction struct {
+	ContentKey domain.ContentKey
+	Weight     float64
+}
+
+func vectorLiteral(vector []float32) string {
+	values := make([]string, len(vector))
+	for index, value := range vector {
+		values[index] = strconv.FormatFloat(float64(value), 'f', -1, 32)
+	}
+	return "[" + strings.Join(values, ",") + "]"
+}
 
 // SceneVector maps canonical catalog features into a fixed, normalized vector.
 func SceneVector(features []string) ([]float32, bool) {
@@ -51,4 +67,42 @@ func SceneVector(features []string) ([]float32, bool) {
 		vector[index] /= float32(length)
 	}
 	return vector, true
+}
+
+// ProfileVector builds one normalized account profile and records consumed scenes.
+func ProfileVector(sceneVectors map[domain.ContentKey][]float32, interactions []WeightedInteraction) ([]float32, map[domain.ContentKey]bool, bool) {
+	known := make(map[domain.ContentKey]bool, len(interactions))
+	var profile []float32
+	for _, interaction := range interactions {
+		known[interaction.ContentKey] = true
+		vector, found := sceneVectors[interaction.ContentKey]
+		if !found || interaction.Weight <= 0 {
+			continue
+		}
+		if profile == nil {
+			profile = make([]float32, len(vector))
+		}
+		if len(vector) != len(profile) {
+			continue
+		}
+		for index, value := range vector {
+			profile[index] += value * float32(interaction.Weight)
+		}
+	}
+	if len(profile) == 0 {
+		return nil, known, false
+	}
+
+	var squaredLength float64
+	for _, value := range profile {
+		squaredLength += float64(value * value)
+	}
+	length := math.Sqrt(squaredLength)
+	if length == 0 {
+		return nil, known, false
+	}
+	for index := range profile {
+		profile[index] /= float32(length)
+	}
+	return profile, known, true
 }
