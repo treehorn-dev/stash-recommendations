@@ -23,6 +23,11 @@ Bring up the local database:
 docker compose up -d postgres
 ```
 
+The compose service uses `pgvector/pgvector:pg16`. Existing deployments on a
+plain PostgreSQL image must be moved to that image before applying migration
+`009_pgvector_recommendations`; take a database backup before replacing the
+container.
+
 Use this DSN for local work:
 
 ```bash
@@ -131,7 +136,9 @@ rm -rf "$helper_dir"
 
 For development, the server also supports `BUILD_MODEL_ON_START=true` on boot.
 `MODEL_O_WEIGHT` defaults to `1.5` and may be overridden with a positive
-number.
+number. A build stores one 256-dimensional hashed vector per source scene and
+uses bounded pgvector cosine retrieval for related scenes and account profiles;
+it does not materialize pairwise scene recommendations.
 
 ## Configure the Plugin
 

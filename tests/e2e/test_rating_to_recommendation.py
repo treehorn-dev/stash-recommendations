@@ -239,7 +239,7 @@ def _temporary_schema(postgres_dsn: str, schema: str) -> Iterator[None]:
 def _schema_dsn(dsn: str, schema: str) -> str:
     parsed = parse.urlparse(dsn)
     query = parse.parse_qs(parsed.query, keep_blank_values=True)
-    query["search_path"] = [schema]
+    query["search_path"] = [f"{schema},public"]
     return parse.urlunparse(parsed._replace(query=parse.urlencode(query, doseq=True)))
 
 

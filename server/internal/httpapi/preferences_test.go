@@ -100,7 +100,7 @@ func openInteractionHTTPStore(t *testing.T) *store.Store {
 	parsed, err := url.Parse(dsn)
 	require.NoError(t, err)
 	query := parsed.Query()
-	query.Set("search_path", schema)
+	query.Set("search_path", schema+",public")
 	parsed.RawQuery = query.Encode()
 
 	repository, err := store.Open(ctx, parsed.String())
