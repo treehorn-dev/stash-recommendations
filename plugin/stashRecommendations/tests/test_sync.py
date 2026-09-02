@@ -189,28 +189,33 @@ def test_queue_metadata_sync_deduplicates_keys_and_queues_only_configured_source
     assert preview == {"requires_confirmation": True, "count": 1, "kind": "metadata-sync"}
     assert _pending_payloads(database_path, "source_snapshot") == []
 
-    result = queue_metadata_sync(stash, outbox, source, confirmed=True)
+    result = queue_metadata_sync(stash, outbox, source, confirmed=True, batch_size=1)
     payloads = _pending_payloads(database_path, "source_snapshot")
 
-    assert result == {"queued": 1, "kind": "metadata-sync"}
+    assert result == {
+        "queued": 1,
+        "processed": 1,
+        "job_status": {"pending": 0, "in_progress": 0, "completed": 1, "failed": 0},
+        "kind": "metadata-sync",
+    }
     assert len(payloads) == 1
     assert payloads[0]["content_key"] == {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}
     assert payloads[0]["source_updated_at"] == "2026-08-31T00:00:00Z"
 
 
-def test_queue_metadata_sync_continues_after_per_key_mapping_failure(tmp_path: Path) -> None:
+def test_queue_metadata_sync_enqueues_all_canonical_keys_but_processes_only_bounded_batch(tmp_path: Path) -> None:
     database_path = tmp_path / "recommendations.sqlite3"
     stash = FakeStash(
         rated_scenes=[
             {
                 "id": "1",
                 "rating100": 80,
-                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}],
+                "stash_ids": [{"endpoint": "HTTPS://BOX.EXAMPLE/graphql/", "stash_id": "scene-2"}],
             },
             {
                 "id": "2",
                 "rating100": 40,
-                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-2"}],
+                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}],
             },
         ]
     )
@@ -223,7 +228,7 @@ def test_queue_metadata_sync_continues_after_per_key_mapping_failure(tmp_path: P
                     "title": f"Example {variables['id']}",
                     "release_date": "2026-08-30",
                     "urls": [f"https://example.test/scenes/{variables['id']}"],
-                    "updated": None if variables["id"] == "scene-1" else "2026-08-31T00:00:00Z",
+                    "updated": "2026-08-31T00:00:00Z",
                     "images": [{"url": "https://images.example/scene.jpg"}],
                     "performers": [],
                     "tags": [],
@@ -233,25 +238,31 @@ def test_queue_metadata_sync_continues_after_per_key_mapping_failure(tmp_path: P
     )
     outbox = Outbox(database_path)
 
-    result = queue_metadata_sync(stash, outbox, source, confirmed=True)
+    result = queue_metadata_sync(stash, outbox, source, confirmed=True, batch_size=1)
     payloads = _pending_payloads(database_path, "source_snapshot")
 
     assert result == {
         "queued": 1,
-        "failed": 1,
+        "processed": 1,
+        "job_status": {"pending": 1, "in_progress": 0, "completed": 1, "failed": 0},
         "kind": "metadata-sync",
-        "errors": [
-            {
-                "content_key": {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
-                "error": "source_updated_at is required",
-            }
-        ],
     }
     assert len(payloads) == 1
-    assert payloads[0]["content_key"] == {"endpoint": "https://box.example/graphql", "stash_id": "scene-2"}
+    assert payloads[0]["content_key"] == {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}
+
+    second = queue_metadata_sync(stash, outbox, source, confirmed=True, batch_size=1)
+    payloads = _pending_payloads(database_path, "source_snapshot")
+
+    assert second == {
+        "queued": 1,
+        "processed": 1,
+        "job_status": {"pending": 0, "in_progress": 0, "completed": 2, "failed": 0},
+        "kind": "metadata-sync",
+    }
+    assert [payload["content_key"]["stash_id"] for payload in payloads] == ["scene-1", "scene-2"]
 
 
-def test_queue_metadata_sync_continues_after_timeout_failure_per_key(
+def test_queue_metadata_sync_returns_failed_jobs_to_pending_after_processing_error(
     tmp_path: Path, monkeypatch: object
 ) -> None:
     database_path = tmp_path / "recommendations.sqlite3"
@@ -300,12 +311,14 @@ def test_queue_metadata_sync_continues_after_timeout_failure_per_key(
     )
     outbox = Outbox(database_path)
 
-    result = queue_metadata_sync(stash, outbox, source, confirmed=True)
+    result = queue_metadata_sync(stash, outbox, source, confirmed=True, batch_size=2)
     payloads = _pending_payloads(database_path, "source_snapshot")
 
     assert result == {
         "queued": 1,
         "failed": 1,
+        "processed": 2,
+        "job_status": {"pending": 1, "in_progress": 0, "completed": 1, "failed": 0},
         "kind": "metadata-sync",
         "errors": [
             {

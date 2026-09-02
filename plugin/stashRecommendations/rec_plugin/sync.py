@@ -9,8 +9,11 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from rec_plugin.contracts import ContentKey, PreferenceEvent
 from rec_plugin.database import connect as connect_database
+from rec_plugin.metadata_jobs import MetadataJobs
 from rec_plugin.outbox import Outbox
 from rec_plugin.snapshots import to_source_snapshot
+
+DEFAULT_METADATA_SYNC_BATCH_SIZE = 50
 
 
 class SyncState:
@@ -122,27 +125,48 @@ def queue_engagement_sync(stash: Any, outbox: Outbox, state: SyncState, *, confi
     return {"queued": len(events), "kind": "engagement-sync"}
 
 
-def queue_metadata_sync(stash: Any, outbox: Outbox, source: Any, *, confirmed: bool) -> dict[str, Any]:
+def queue_metadata_sync(
+    stash: Any,
+    outbox: Outbox,
+    source: Any,
+    *,
+    confirmed: bool,
+    batch_size: int = DEFAULT_METADATA_SYNC_BATCH_SIZE,
+) -> dict[str, Any]:
     keys = list(_configured_content_keys(stash, source))
     if not confirmed:
         return {"requires_confirmation": True, "count": len(keys), "kind": "metadata-sync"}
-    queued = 0
-    errors: list[dict[str, Any]] = []
+    jobs = MetadataJobs(outbox.path)
     for key in keys:
+        jobs.enqueue(key.endpoint, key.stash_id)
+    claimed = jobs.claim(batch_size)
+    queued = 0
+    processed = 0
+    errors: list[dict[str, Any]] = []
+    for endpoint, stash_id in claimed:
+        processed += 1
         try:
-            scene = source.fetch_scene(key.endpoint, key.stash_id)
+            scene = source.fetch_scene(endpoint, stash_id)
             if scene is None:
+                jobs.complete(endpoint, stash_id)
                 continue
-            outbox.enqueue(to_source_snapshot(key.endpoint, _utcnow(), scene))
+            outbox.enqueue(to_source_snapshot(endpoint, _utcnow(), scene))
+            jobs.complete(endpoint, stash_id)
             queued += 1
         except Exception as error:
+            jobs.fail(endpoint, stash_id)
             errors.append(
                 {
-                    "content_key": {"endpoint": key.endpoint, "stash_id": key.stash_id},
+                    "content_key": {"endpoint": endpoint, "stash_id": stash_id},
                     "error": str(error),
                 }
             )
-    result: dict[str, Any] = {"queued": queued, "kind": "metadata-sync"}
+    result: dict[str, Any] = {
+        "queued": queued,
+        "processed": processed,
+        "job_status": jobs.status(),
+        "kind": "metadata-sync",
+    }
     if errors:
         result["failed"] = len(errors)
         result["errors"] = errors
