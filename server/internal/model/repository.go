@@ -215,6 +215,171 @@ func (repository *Repository) CatalogedScenes(ctx context.Context) ([]domain.Con
 	return scenes, nil
 }
 
+func (repository *Repository) CatalogScenes(ctx context.Context) ([]CatalogScene, error) {
+	rows, err := repository.pool.Query(ctx, `
+		WITH scene_features AS (
+			SELECT endpoint, stash_id, 'studio:' || studio_endpoint || ':' || studio_stash_id AS feature
+			FROM source_scenes
+			WHERE studio_endpoint IS NOT NULL AND studio_stash_id IS NOT NULL
+			UNION ALL
+			SELECT links.scene_endpoint, links.scene_stash_id,
+				'performer:' || links.performer_endpoint || ':' || links.performer_stash_id
+			FROM source_scene_performers AS links
+			UNION ALL
+			SELECT links.scene_endpoint, links.scene_stash_id,
+				'tag:' || links.tag_endpoint || ':' || links.tag_stash_id
+			FROM source_scene_tags AS links
+			UNION ALL
+			SELECT links.scene_endpoint, links.scene_stash_id,
+				'performer_gender:' || lower(btrim(performer.gender))
+			FROM source_scene_performers AS links
+			JOIN source_performers AS performer
+				ON performer.endpoint = links.performer_endpoint AND performer.stash_id = links.performer_stash_id
+			WHERE NULLIF(btrim(performer.gender), '') IS NOT NULL
+			UNION ALL
+			SELECT links.scene_endpoint, links.scene_stash_id,
+				'performer_ethnicity:' || lower(btrim(performer.ethnicity))
+			FROM source_scene_performers AS links
+			JOIN source_performers AS performer
+				ON performer.endpoint = links.performer_endpoint AND performer.stash_id = links.performer_stash_id
+			WHERE NULLIF(btrim(performer.ethnicity), '') IS NOT NULL
+			UNION ALL
+			SELECT links.scene_endpoint, links.scene_stash_id,
+				'performer_country:' || lower(btrim(performer.country))
+			FROM source_scene_performers AS links
+			JOIN source_performers AS performer
+				ON performer.endpoint = links.performer_endpoint AND performer.stash_id = links.performer_stash_id
+			WHERE NULLIF(btrim(performer.country), '') IS NOT NULL
+		)
+		SELECT scenes.endpoint, scenes.stash_id,
+			COALESCE(array_agg(scene_features.feature) FILTER (WHERE scene_features.feature IS NOT NULL), ARRAY[]::text[])
+		FROM source_scenes AS scenes
+		LEFT JOIN scene_features ON scene_features.endpoint = scenes.endpoint AND scene_features.stash_id = scenes.stash_id
+		GROUP BY scenes.endpoint, scenes.stash_id
+		ORDER BY scenes.endpoint, scenes.stash_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query catalog scene features: %w", err)
+	}
+	defer rows.Close()
+
+	var scenes []CatalogScene
+	for rows.Next() {
+		var scene CatalogScene
+		if err := rows.Scan(&scene.ContentKey.Endpoint, &scene.ContentKey.StashID, &scene.Features); err != nil {
+			return nil, fmt.Errorf("scan catalog scene features: %w", err)
+		}
+		scenes = append(scenes, scene)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate catalog scene features: %w", err)
+	}
+	return scenes, nil
+}
+
+func (repository *Repository) SaveAndActivateVectors(ctx context.Context, projection VectorProjection) (string, error) {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return "", fmt.Errorf("begin vector recommendation transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(81102535415121123)); err != nil {
+		return "", fmt.Errorf("lock vector recommendation build: %w", err)
+	}
+
+	var versionID string
+	if err := tx.QueryRow(ctx, `INSERT INTO model_versions (active) VALUES (false) RETURNING id`).Scan(&versionID); err != nil {
+		return "", fmt.Errorf("create inactive vector model version: %w", err)
+	}
+	if err := insertSceneVectors(ctx, tx, versionID, projection.SceneVectors); err != nil {
+		return "", err
+	}
+	if err := insertProfileRecommendations(ctx, tx, versionID, projection.Profiles); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE model_versions SET active = false WHERE active`); err != nil {
+		return "", fmt.Errorf("deactivate prior model version: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE model_versions SET active = true, activated_at = now() WHERE id = $1`, versionID); err != nil {
+		return "", fmt.Errorf("activate vector model version: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM model_scene_vectors WHERE model_version_id <> $1`, versionID); err != nil {
+		return "", fmt.Errorf("prune inactive scene vectors: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit vector recommendation projection: %w", err)
+	}
+	return versionID, nil
+}
+
+func insertSceneVectors(ctx context.Context, tx pgx.Tx, versionID string, vectors []SceneEmbedding) error {
+	batch := &pgx.Batch{}
+	for _, vector := range vectors {
+		batch.Queue(`
+			INSERT INTO model_scene_vectors (model_version_id, endpoint, stash_id, embedding)
+			VALUES ($1, $2, $3, $4::vector)
+		`, versionID, vector.ContentKey.Endpoint, vector.ContentKey.StashID, vectorLiteral(vector.Embedding))
+	}
+	results := tx.SendBatch(ctx, batch)
+	defer results.Close()
+	for range vectors {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("insert scene vector: %w", err)
+		}
+	}
+	return nil
+}
+
+func insertProfileRecommendations(ctx context.Context, tx pgx.Tx, versionID string, profiles []AccountProfile) error {
+	for _, profile := range profiles {
+		rows, err := tx.Query(ctx, `
+			SELECT endpoint, stash_id, 1 - (embedding <=> $2::vector) AS score
+			FROM model_scene_vectors
+			WHERE model_version_id = $1
+			ORDER BY embedding <=> $2::vector, endpoint, stash_id
+			LIMIT 50
+		`, versionID, vectorLiteral(profile.Embedding))
+		if err != nil {
+			return fmt.Errorf("query profile candidates: %w", err)
+		}
+		var candidates []struct {
+			key   domain.ContentKey
+			score float64
+		}
+		for rows.Next() {
+			var key domain.ContentKey
+			var score float64
+			if err := rows.Scan(&key.Endpoint, &key.StashID, &score); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan profile candidate: %w", err)
+			}
+			candidates = append(candidates, struct {
+				key   domain.ContentKey
+				score float64
+			}{key: key, score: score})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("iterate profile candidates: %w", err)
+		}
+		rows.Close()
+
+		reasons, err := json.Marshal(profile.Reasons)
+		if err != nil {
+			return fmt.Errorf("encode profile reasons: %w", err)
+		}
+		for _, candidate := range candidates {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO user_recommendations (model_version_id, account_id, source_endpoint, source_stash_id, score, reasons)
+				VALUES ($1, $2, $3, $4, $5, $6)
+			`, versionID, profile.AccountID, candidate.key.Endpoint, candidate.key.StashID, candidate.score, reasons); err != nil {
+				return fmt.Errorf("insert profile recommendation: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 func (repository *Repository) SaveAndActivate(ctx context.Context, projection Projection) (string, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -275,10 +440,19 @@ func (repository *Repository) Related(ctx context.Context, source domain.Content
 		return nil, version, err
 	}
 	return repository.readRecommendations(ctx, `
-		SELECT neighbor_endpoint, neighbor_stash_id, score, reasons
-		FROM item_neighbors
-		WHERE model_version_id = $1 AND source_endpoint = $2 AND source_stash_id = $3
-		ORDER BY score DESC, neighbor_endpoint, neighbor_stash_id
+		WITH source AS (
+			SELECT embedding
+			FROM model_scene_vectors
+			WHERE model_version_id = $1 AND endpoint = $2 AND stash_id = $3
+		)
+		SELECT candidates.endpoint, candidates.stash_id,
+			1 - (candidates.embedding <=> source.embedding) AS score,
+			'["content_similarity"]'::jsonb AS reasons
+		FROM model_scene_vectors AS candidates
+		CROSS JOIN source
+		WHERE candidates.model_version_id = $1
+			AND (candidates.endpoint, candidates.stash_id) <> ($2, $3)
+		ORDER BY candidates.embedding <=> source.embedding, candidates.endpoint, candidates.stash_id
 		LIMIT $4
 	`, version, source.Endpoint, source.StashID, normalizeLimit(limit))
 }

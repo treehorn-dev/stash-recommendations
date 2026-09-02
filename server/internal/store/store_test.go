@@ -14,6 +14,14 @@ import (
 	"github.com/treehorn/stash-recommendations/server/internal/auth"
 )
 
+func TestMigrationLedgerIncludesPgvectorRecommendations(t *testing.T) {
+	versions := make([]string, 0, len(migrations))
+	for _, migration := range migrations {
+		versions = append(versions, migration.version)
+	}
+	require.Contains(t, versions, "009_pgvector_recommendations")
+}
+
 func TestMigrateCreatesBaseStorageTables(t *testing.T) {
 	dsn := os.Getenv("POSTGRES_TEST_DSN")
 	if dsn == "" {
@@ -113,7 +121,7 @@ func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations"}, versions)
 }
 
 func TestMigrateAddsSessionProjectionTablesToExistingStore(t *testing.T) {
@@ -146,7 +154,7 @@ func TestMigrateAddsSessionProjectionTablesToExistingStore(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations"}, versions)
 }
 
 func TestMigrateAddsSourceCatalogProjectionColumnsToExistingStore(t *testing.T) {
@@ -203,7 +211,7 @@ func TestMigrateAddsSourceCatalogProjectionColumnsToExistingStore(t *testing.T) 
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations"}, versions)
 }
 
 func openIsolatedMigrationStore(t *testing.T) *Store {
