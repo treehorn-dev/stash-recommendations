@@ -41,6 +41,20 @@ func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T
 	require.Contains(t, reasonsFor(forYou, "scene-b"), "play_profile")
 }
 
+func TestBuildPersistsBehavioralOnlySessionScene(t *testing.T) {
+	repository, pool := openModelTestStore(t)
+	ctx := context.Background()
+	account := seedModelAccount(t, pool)
+	seedSharedPerformer(t, pool, "metadata", "unused")
+	seedLatestLatencySession(t, pool, account, []sessionSeed{{"metadata", "scene.played"}, {"behavioral", "scene.o"}})
+
+	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
+	require.NoError(t, err)
+	items, _, err := NewRepository(repository.Pool()).Related(ctx, contentKey("metadata"), 10)
+	require.NoError(t, err)
+	require.Contains(t, recommendationIDs(items), "behavioral")
+}
+
 func TestCatalogCandidatesIncludeValidatedSceneAttributes(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
