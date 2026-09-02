@@ -31,7 +31,8 @@ def test_source_client_fetches_only_configured_endpoint() -> None:
         ("https://box.example/graphql", "source-key", calls[0][2], {"id": "scene-44"})
     ]
     assert "findScene" in calls[0][2]
-    assert "groups" in calls[0][2]
+    assert "urls {" in calls[0][2]
+    assert "groups" not in calls[0][2]
 
 
 def test_source_client_rate_limits_repeated_requests_per_endpoint() -> None:
@@ -69,7 +70,7 @@ def test_source_client_rate_limits_repeated_requests_per_endpoint() -> None:
     assert sleeps == [1.0]
 
 
-def test_source_client_fetches_schema_compatible_group_relationships() -> None:
+def test_source_client_uses_fansdb_compatible_url_selection_without_groups() -> None:
     captured_queries: list[str] = []
 
     def transport(url: str, api_key: str, query: str, variables: dict[str, object]) -> dict[str, object]:
@@ -80,7 +81,7 @@ def test_source_client_fetches_schema_compatible_group_relationships() -> None:
                 "findScene": {
                     "id": "scene-44",
                     "updated": "2026-08-30T12:00:00Z",
-                    "groups": [{"group": {"id": "group-1", "name": "Compilation"}}],
+                    "urls": [{"url": "https://example.test/scenes/scene-44"}],
                 }
             }
         }
@@ -93,9 +94,9 @@ def test_source_client_fetches_schema_compatible_group_relationships() -> None:
     scene = client.fetch_scene("https://box.example/graphql", "scene-44")
 
     assert scene is not None
-    assert scene["groups"] == [{"group": {"id": "group-1", "name": "Compilation"}}]
-    assert "groups {" in captured_queries[0]
-    assert "group {" in captured_queries[0]
+    assert scene["urls"] == [{"url": "https://example.test/scenes/scene-44"}]
+    assert "urls {" in captured_queries[0]
+    assert "groups" not in captured_queries[0]
 
 
 def test_source_client_default_transport_uses_explicit_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
