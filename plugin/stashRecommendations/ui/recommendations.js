@@ -51,6 +51,25 @@
     });
   }
 
+  function partitionRecommendations(items, findScenes, showRemote) {
+    const sections = { watched: [], unwatched: [], remote: [] };
+    for (const entry of resolveLocalRecommendations(items, findScenes, showRemote)) {
+      if (entry.kind === "remote") {
+        sections.remote.push(entry);
+      } else if (entry.item?.watched === true || localSceneWasWatched(entry.scene)) {
+        sections.watched.push(entry);
+      } else {
+        sections.unwatched.push(entry);
+      }
+    }
+    return sections;
+  }
+
+  function localSceneWasWatched(scene) {
+    return (Array.isArray(scene?.play_history) && scene.play_history.length > 0)
+      || (Array.isArray(scene?.o_history) && scene.o_history.length > 0);
+  }
+
   function normalizeRecommendationResponse(output) {
     if (!output || typeof output !== "object") {
       return { model_version: "", items: [] };
@@ -99,6 +118,8 @@
           scenes {
             id
             title
+            play_history
+            o_history
             paths {
               screenshot
             }
@@ -350,6 +371,11 @@
           React.createElement(RecommendationState, null, "No recommendations yet.")
         );
       }
+      const sections = {
+        watched: state.items.filter((entry) => entry.kind === "local" && (entry.item?.watched === true || localSceneWasWatched(entry.scene))),
+        unwatched: state.items.filter((entry) => entry.kind === "local" && entry.item?.watched !== true && !localSceneWasWatched(entry.scene)),
+        remote: state.items.filter((entry) => entry.kind === "remote"),
+      };
       return React.createElement(
         "div",
         { className: "stash-recommendations" },
@@ -360,16 +386,23 @@
           React.createElement("h2", null, props.title),
           React.createElement("div", { className: "stash-recommendations__version" }, state.modelVersion || "")
         ),
-        React.createElement(
-          "div",
-          { className: "stash-recommendations__grid" },
-          state.items.map((entry, index) =>
-            React.createElement(RecommendationCard, {
-              entry,
-              key: `${entry.kind}:${entry.kind === "local" ? entry.scene.id : entry.url}:${index}`,
-            })
-          )
-        )
+        ["unwatched", "watched", "remote"].map((name) => {
+          const entries = sections[name];
+          if (!entries.length) return null;
+          return React.createElement(
+            "section",
+            { className: "stash-recommendations__section", key: name },
+            React.createElement("h3", null, props.sectionTitles[name]),
+            React.createElement(
+              "div",
+              { className: "stash-recommendations__grid" },
+              entries.map((entry, index) => React.createElement(RecommendationCard, {
+                entry,
+                key: `${entry.kind}:${entry.kind === "local" ? entry.scene.id : entry.url}:${index}`,
+              }))
+            )
+          );
+        })
       );
     }
 
@@ -389,6 +422,11 @@
           return fetchRelated(contentKeys, runPluginOperation);
         },
         title: "Related Scenes",
+        sectionTitles: {
+          unwatched: "Watch next: unwatched items from your stash",
+          watched: "Watch again from your stash",
+          remote: "Grow your stash with related content",
+        },
       });
     }
 
@@ -399,6 +437,11 @@
           return fetchForYou(20, runPluginOperation);
         },
         title: "For You",
+        sectionTitles: {
+          unwatched: "Explore your stash",
+          watched: "Watch again from your stash",
+          remote: "Grow your stash",
+        },
       });
     }
 
@@ -472,6 +515,7 @@
   return {
     fetchForYou,
     fetchRelated,
+    partitionRecommendations,
     register,
     resolveLocalRecommendations,
   };
