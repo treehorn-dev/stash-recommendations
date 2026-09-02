@@ -104,6 +104,23 @@ def test_network_and_5xx_errors_retry_without_quarantine(tmp_path: Path, monkeyp
     assert status["last_error"] == "server busy"
 
 
+def test_delivery_status_records_redacted_latest_attempt(tmp_path: Path, monkeypatch: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    outbox = seeded_outbox(tmp_path)
+    client = FakeServiceClient([ServiceResponse(status_code=401, error="unauthorized")])
+
+    DeliveryWorker(outbox, client, pause_key="auth-a").deliver_ready(NOW)
+
+    assert outbox.status()["last_delivery_attempt"] == {
+        "attempted_at": "2026-08-30T12:00:00Z",
+        "item_type": "preference_event",
+        "metric": "rating",
+        "outcome": "paused",
+        "status_code": 401,
+        "error": "unauthorized",
+    }
+
+
 def test_service_client_timeout_reaches_retry_without_quarantine(tmp_path: Path, monkeypatch: object) -> None:
     freeze_outbox_now(monkeypatch)
     outbox = seeded_outbox(tmp_path)

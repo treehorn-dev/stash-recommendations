@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any
 
@@ -157,6 +158,36 @@ class Outbox:
                     (pause_key, _isoformat(_utcnow())),
                 )
 
+    def record_delivery_attempt(
+        self,
+        item: OutboxItem,
+        now: datetime,
+        outcome: str,
+        *,
+        status_code: int | None = None,
+        error: str | None = None,
+    ) -> None:
+        attempt = {
+            "attempted_at": _isoformat(now),
+            "item_type": item.item_type,
+            "metric": item.metric,
+            "outcome": outcome,
+            "status_code": status_code,
+            "error": _redact_error(error),
+        }
+        encoded = json.dumps(attempt, sort_keys=True)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO delivery_state(state_key, state_value, updated_at)
+                VALUES('last_delivery_attempt', ?, ?)
+                ON CONFLICT(state_key) DO UPDATE SET state_value = excluded.state_value, updated_at = excluded.updated_at
+                """,
+                (encoded, _isoformat(now)),
+            )
+        with self._path.with_name("recommendations.delivery.log").open("a", encoding="utf-8") as log_file:
+            log_file.write(encoded + "\n")
+
     def resume_delivery(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -221,6 +252,9 @@ class Outbox:
             paused = connection.execute(
                 "SELECT state_value FROM delivery_state WHERE state_key = 'paused_reason'"
             ).fetchone()
+            attempt = connection.execute(
+                "SELECT state_value FROM delivery_state WHERE state_key = 'last_delivery_attempt'"
+            ).fetchone()
         return {
             "pending": pending,
             "quarantined": quarantined,
@@ -230,6 +264,7 @@ class Outbox:
                 "active": paused is not None,
                 "reason": paused[0] if paused else None,
             },
+            "last_delivery_attempt": json.loads(attempt[0]) if attempt else None,
         }
 
     def _initialize(self) -> None:
@@ -318,6 +353,13 @@ def _empty_counts() -> dict[str, int]:
 
 def _isoformat(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _redact_error(error: str | None) -> str | None:
+    if error is None:
+        return None
+    redacted = re.sub(r"(?i)(authorization:\s*bearer\s+|bearer\s+)[^\s,;]+", r"\1[REDACTED]", error)
+    return re.sub(r"(?i)(api[_-]?key=)[^&\s]+", r"\1[REDACTED]", redacted)
 
 
 def _utcnow() -> datetime:
