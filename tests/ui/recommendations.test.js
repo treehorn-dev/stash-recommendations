@@ -15,8 +15,38 @@ const modulePath = path.resolve(
 const {
   fetchForYou,
   fetchRelated,
+  partitionRecommendations,
   resolveLocalRecommendations,
 } = require(modulePath);
+
+test("partitionRecommendations separates watched, unwatched, and remote candidates", () => {
+  const items = [
+    { content_key: { endpoint: "https://box.example/graphql", stash_id: "watched" }, watched: true },
+    { content_key: { endpoint: "https://box.example/graphql", stash_id: "unwatched" }, watched: false },
+    { content_key: { endpoint: "https://box.example/graphql", stash_id: "remote" }, watched: false, canonical_url: "https://box.example/scenes/remote" },
+  ];
+
+  const sections = partitionRecommendations(
+    items,
+    (item) => item.content_key.stash_id === "remote" ? [] : [{ id: item.content_key.stash_id, title: item.content_key.stash_id }],
+    true
+  );
+
+  assert.deepEqual(sections.watched.map((entry) => entry.scene.id), ["watched"]);
+  assert.deepEqual(sections.unwatched.map((entry) => entry.scene.id), ["unwatched"]);
+  assert.deepEqual(sections.remote.map((entry) => entry.url), ["https://box.example/scenes/remote"]);
+});
+
+test("partitionRecommendations classifies local play history as watched", () => {
+  const sections = partitionRecommendations(
+    [{ content_key: { endpoint: "https://box.example/graphql", stash_id: "scene-1" } }],
+    () => [{ id: "scene-1", title: "Local Scene", play_history: ["2026-09-02T00:00:00Z"], o_history: [] }],
+    false
+  );
+
+  assert.equal(sections.watched.length, 1);
+  assert.equal(sections.unwatched.length, 0);
+});
 
 test("remote-only results stay hidden until enabled", () => {
   const items = [
