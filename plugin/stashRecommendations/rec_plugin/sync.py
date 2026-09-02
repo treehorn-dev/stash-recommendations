@@ -8,6 +8,7 @@ from typing import Any, Iterable, Iterator
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from rec_plugin.contracts import ContentKey, PreferenceEvent
+from rec_plugin.database import connect as connect_database
 from rec_plugin.outbox import Outbox
 from rec_plugin.snapshots import to_source_snapshot
 
@@ -81,7 +82,7 @@ class SyncState:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._path)
+        return connect_database(self._path)
 
 
 def queue_rating_sync(stash: Any, outbox: Outbox, state: SyncState, *, confirmed: bool) -> dict[str, Any]:
