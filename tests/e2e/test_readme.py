@@ -49,7 +49,12 @@ def test_readme_privacy_smoke_checks_snapshot_json_column(tmp_path: Path) -> Non
         stored_payloads = _stored_snapshot_payloads(schema_dsn)
 
     assert preview == {"requires_confirmation": True, "count": 2, "kind": "metadata-sync"}
-    assert result == {"queued": 2, "kind": "metadata-sync"}
+    assert result == {
+        "queued": 2,
+        "processed": 2,
+        "job_status": {"pending": 0, "in_progress": 0, "completed": 2, "failed": 0},
+        "kind": "metadata-sync",
+    }
     assert drained["delivery"] == {"delivered": 2, "retried": 0, "quarantined": 0, "paused": False}
     assert "Scene A" in stored_payloads
     assert "source-key" not in stored_payloads
