@@ -22,6 +22,10 @@ settings:
     displayName: Show Remote Results
     description: Include remote-only recommendations when available.
     type: BOOLEAN
+  allow_private_http:
+    displayName: Allow Private HTTP
+    description: Allow an HTTP recommendation service only at a private or Tailnet IP address.
+    type: BOOLEAN
 tasks:
   - name: sync-ratings
     description: Queue a full sync of explicit ratings from local Stash.
