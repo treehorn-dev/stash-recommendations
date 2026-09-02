@@ -135,6 +135,11 @@ number.
 
 ## Configure the Plugin
 
+Install through Stash's **Settings > Plugins > Available Packages** using this
+remote package-list URL:
+
+`https://github.com/treehorn-dev/stash-recommendations/releases/latest/download/index.yml`
+
 In Stash plugin settings for `stashRecommendations`, configure:
 
 - `service_url`: public HTTPS base URL for the service
