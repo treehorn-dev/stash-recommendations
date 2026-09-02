@@ -31,6 +31,10 @@ class Outbox:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
+    @property
+    def path(self) -> Path:
+        return self._path
+
     def enqueue(self, item: PreferenceEvent | SourceSnapshot) -> None:
         if isinstance(item, PreferenceEvent):
             self._insert_row(
