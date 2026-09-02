@@ -21,7 +21,9 @@ query FindScene($id: ID!) {
     date
     release_date
     production_date
-    urls
+    urls {
+      url
+    }
     duration
     director
     code
@@ -33,12 +35,6 @@ query FindScene($id: ID!) {
       id
       name
     }
-    groups {
-      group {
-        id
-        name
-      }
-    }
     images {
       url
     }
@@ -49,7 +45,9 @@ query FindScene($id: ID!) {
         name
         aliases
         gender
-        urls
+        urls {
+          url
+        }
         ethnicity
         country
         eye_color
