@@ -9,6 +9,7 @@ import sqlite3
 from typing import Any
 
 from rec_plugin.contracts import PreferenceEvent, SourceSnapshot
+from rec_plugin.database import connect as connect_database
 
 
 STATE_PENDING = "pending"
@@ -332,7 +333,7 @@ class Outbox:
             return connection.execute(query, parameters).fetchone()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path)
+        connection = connect_database(self._path)
         connection.row_factory = sqlite3.Row
         return connection
 
