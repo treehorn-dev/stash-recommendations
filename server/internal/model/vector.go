@@ -69,6 +69,27 @@ func SceneVector(features []string) ([]float32, bool) {
 	return vector, true
 }
 
+func combineVectors(vectors ...[]float32) ([]float32, bool) {
+	combined := make([]float32, sceneVectorDimensions)
+	for _, vector := range vectors {
+		for index, value := range vector {
+			combined[index] += value
+		}
+	}
+	var squaredLength float64
+	for _, value := range combined {
+		squaredLength += float64(value * value)
+	}
+	if squaredLength == 0 {
+		return nil, false
+	}
+	length := float32(math.Sqrt(squaredLength))
+	for index := range combined {
+		combined[index] /= length
+	}
+	return combined, true
+}
+
 // ProfileVector builds one normalized account profile and records consumed scenes.
 func ProfileVector(sceneVectors map[domain.ContentKey][]float32, interactions []WeightedInteraction) ([]float32, map[domain.ContentKey]bool, bool) {
 	known := make(map[domain.ContentKey]bool, len(interactions))
