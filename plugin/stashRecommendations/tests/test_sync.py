@@ -124,6 +124,35 @@ def test_queue_engagement_sync_skips_pending_deterministic_events_without_histor
     assert len(_pending_payloads(database_path, "preference_event")) == 1
 
 
+def test_queue_engagement_sync_batches_sequence_reservation_history_markers_and_outbox_writes(tmp_path: Path) -> None:
+    database_path = tmp_path / "recommendations.sqlite3"
+    stash = FakeStash(
+        engagement_history=[
+            {
+                "id": "44",
+                "stash_ids": [{"endpoint": "https://box.example/graphql", "stash_id": "scene-44"}],
+                "play_history": [PLAYED_AT],
+                "o_history": [O_AT],
+            }
+        ]
+    )
+    state = RecordingSyncState(database_path, client_id_factory=lambda: CLIENT_ID)
+    outbox = RecordingOutbox(database_path)
+
+    result = queue_engagement_sync(stash, outbox, state, confirmed=True)
+    payloads = _pending_payloads(database_path, "preference_event")
+
+    assert result == {"queued": 2, "kind": "engagement-sync"}
+    assert state.reserve_counts == [2]
+    assert state.next_sequence_calls == 0
+    assert state.remember_many_event_ids == [[payload["event_id"] for payload in payloads]]
+    assert state.remembered_event_ids == []
+    assert outbox.enqueue_many_counts == [2]
+    assert outbox.enqueue_event_ids == []
+    assert [payload["sequence"] for payload in payloads] == [1, 2]
+    assert sorted(_remembered_history_event_ids(database_path)) == sorted(payload["event_id"] for payload in payloads)
+
+
 def test_build_history_event_id_varies_by_client_id() -> None:
     first = build_history_event_id(
         "550e8400-e29b-41d4-a716-446655440001",
@@ -384,6 +413,47 @@ class FakeStash:
         return [dict(scene) for scene in self._engagement_history]
 
 
+class RecordingSyncState(SyncState):
+    def __init__(self, path: Path, *, client_id_factory: callable | None = None) -> None:
+        super().__init__(path, client_id_factory=client_id_factory)
+        self.reserve_counts: list[int] = []
+        self.next_sequence_calls = 0
+        self.remembered_event_ids: list[str] = []
+        self.remember_many_event_ids: list[list[str]] = []
+
+    def next_sequence(self) -> int:
+        self.next_sequence_calls += 1
+        return super().next_sequence()
+
+    def reserve_sequences(self, count: int) -> tuple[str, list[int]]:
+        self.reserve_counts.append(count)
+        return super().reserve_sequences(count)
+
+    def remember_history_event(self, event_id: str) -> None:
+        self.remembered_event_ids.append(event_id)
+        super().remember_history_event(event_id)
+
+    def remember_history_events(self, event_ids: list[str]) -> None:
+        event_id_list = list(event_ids)
+        self.remember_many_event_ids.append(event_id_list)
+        super().remember_history_events(event_id_list)
+
+
+class RecordingOutbox(Outbox):
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.enqueue_event_ids: list[str] = []
+        self.enqueue_many_counts: list[int] = []
+
+    def enqueue(self, item: object) -> None:
+        self.enqueue_event_ids.append(item.event_id)
+        super().enqueue(item)
+
+    def enqueue_many(self, items: list[object]) -> None:
+        self.enqueue_many_counts.append(len(items))
+        super().enqueue_many(items)
+
+
 def _pending_payloads(path: Path, item_type: str) -> list[dict[str, object]]:
     with sqlite3.connect(path) as connection:
         rows = connection.execute(
@@ -391,6 +461,14 @@ def _pending_payloads(path: Path, item_type: str) -> list[dict[str, object]]:
             (item_type,),
         ).fetchall()
     return [json.loads(row[0]) for row in rows]
+
+
+def _remembered_history_event_ids(path: Path) -> list[str]:
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            "SELECT event_id FROM synced_history_events ORDER BY event_id ASC"
+        ).fetchall()
+    return [str(row[0]) for row in rows]
 
 
 class FakeHTTPResponse:

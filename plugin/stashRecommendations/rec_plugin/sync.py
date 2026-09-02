@@ -79,6 +79,16 @@ class SyncState:
                 (event_id, _isoformat(_utcnow())),
             )
 
+    def remember_history_events(self, event_ids: Iterable[str]) -> None:
+        rows = [(event_id, _isoformat(_utcnow())) for event_id in event_ids]
+        if not rows:
+            return
+        with self._connect() as connection:
+            connection.executemany(
+                "INSERT OR IGNORE INTO synced_history_events(event_id, remembered_at) VALUES(?, ?)",
+                rows,
+            )
+
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(
@@ -118,10 +128,12 @@ def queue_engagement_sync(stash: Any, outbox: Outbox, state: SyncState, *, confi
     candidates = list(_new_history_candidates(stash.iter_engagement_history(), state, outbox))
     if not confirmed:
         return {"requires_confirmation": True, "count": len(candidates), "kind": "engagement-sync"}
-    events = list(_materialize_history_events(candidates, state))
-    for event in events:
-        outbox.enqueue(event)
-        state.remember_history_event(event.event_id)
+    if not candidates:
+        return {"queued": 0, "kind": "engagement-sync"}
+    client_id, sequences = state.reserve_sequences(len(candidates))
+    events = list(_materialize_history_events(candidates, client_id=client_id, sequences=sequences))
+    outbox.enqueue_many(events)
+    state.remember_history_events(event.event_id for event in events)
     return {"queued": len(events), "kind": "engagement-sync"}
 
 
@@ -258,14 +270,18 @@ def _new_history_candidates(history_rows: Iterable[dict[str, Any]], state: SyncS
         yield candidate
 
 
-def _materialize_history_events(candidates: Iterable[HistoryCandidate], state: SyncState) -> Iterator[PreferenceEvent]:
-    client_id = state.client_id
-    for candidate in candidates:
+def _materialize_history_events(
+    candidates: Iterable[HistoryCandidate],
+    *,
+    client_id: str,
+    sequences: Iterable[int],
+) -> Iterator[PreferenceEvent]:
+    for candidate, sequence in zip(candidates, sequences):
         yield PreferenceEvent(
             schema_version=1,
             event_id=candidate.event_id,
             client_id=client_id,
-            sequence=state.next_sequence(),
+            sequence=sequence,
             occurred_at=candidate.occurred_at,
             content_key=candidate.content_key,
             kind=candidate.kind,
