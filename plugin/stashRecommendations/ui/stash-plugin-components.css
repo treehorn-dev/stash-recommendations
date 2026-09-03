@@ -174,6 +174,10 @@
   padding-left: 3.25rem;
 }
 
+.stash-composables-entity-card--with-count-rail {
+  overflow: visible;
+}
+
 .stash-composables-entity-card__badge-rail {
   align-items: stretch;
   bottom: 0;
@@ -255,6 +259,61 @@
 .stash-composables-entity-card__footer {
   border-top: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
   padding-top: 0.5rem;
+}
+
+.stash-composables-entity-card__count-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.stash-composables-entity-card__count-entry {
+  position: relative;
+}
+
+.stash-composables-entity-card__count-trigger {
+  align-items: center;
+  background: var(--bs-secondary-bg, rgba(255, 255, 255, 0.1));
+  border: 0;
+  border-radius: 0.25rem;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 0.3rem;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.stash-composables-entity-card__count-trigger:hover,
+.stash-composables-entity-card__count-trigger:focus-visible {
+  background: var(--bs-primary, #0d6efd);
+  color: #fff;
+  outline: none;
+}
+
+.stash-composables-entity-card__count-popover {
+  background: var(--bs-body-bg, #111);
+  border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+  border-radius: 0.3rem;
+  bottom: calc(100% + 0.35rem);
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.3);
+  color: inherit;
+  min-width: max-content;
+  opacity: 0;
+  padding: 0.5rem;
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 120ms ease-out, visibility 120ms ease-out;
+  visibility: hidden;
+  z-index: 3;
+}
+
+.stash-composables-entity-card__count-entry:hover .stash-composables-entity-card__count-popover,
+.stash-composables-entity-card__count-entry:focus-within .stash-composables-entity-card__count-popover {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .stash-composables-entity-card__actions {

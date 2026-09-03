@@ -27,3 +27,13 @@ test("recommendation cards use native-sized columns and clamp verbose content", 
   assert.match(css, /\.stash-recommendations__entity-card\s+\.stash-composables-entity-card__description\s*\{[^}]*-webkit-line-clamp:\s*3/s);
   assert.match(css, /\.stash-recommendations__entity-card\s+\.stash-composables-entity-card__attribute dd\s*\{[^}]*-webkit-line-clamp:\s*1/s);
 });
+
+test("recommendation cards present count controls in a separated native-style rail", () => {
+  const css = fs.readFileSync(
+    path.resolve(__dirname, "..", "..", "plugin", "stashRecommendations", "ui", "recommendations.css"),
+    "utf8"
+  );
+
+  assert.match(css, /\.stash-recommendations__entity-card\s+\.stash-composables-entity-card__count-rail\s*\{[^}]*border-top:/s);
+  assert.match(css, /\.stash-recommendations__entity-card\s+\.stash-composables-entity-card__count-trigger\s*\{[^}]*background:/s);
+});

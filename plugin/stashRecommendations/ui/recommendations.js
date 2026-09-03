@@ -101,33 +101,57 @@
     };
   }
 
-  function namedValues(values, limit = 3) {
-    const names = (Array.isArray(values) ? values : [])
+  function namedItems(values) {
+    return (Array.isArray(values) ? values : [])
       .map((value) => String(value?.name || ""))
-      .filter(Boolean);
-    if (names.length <= limit) {
-      return names.join(", ");
+      .map((name, index) => ({ ...values[index], name }))
+      .filter((value) => value.name);
+  }
+
+  function countLabel(count, singular, plural = `${singular}s`) {
+    return `${count} ${count === 1 ? singular : plural}`;
+  }
+
+  function sceneCountRailEntries(scene = {}) {
+    const performers = namedItems(scene.performers);
+    const tags = namedItems(scene.tags);
+    const groups = namedItems((Array.isArray(scene.groups) ? scene.groups : []).map((entry) => entry?.group));
+    const filesByType = new Map();
+    for (const file of Array.isArray(scene.files) ? scene.files : []) {
+      const kind = file?.video_codec ? "video" : file?.audio_codec ? "audio" : "file";
+      const files = filesByType.get(kind) || [];
+      files.push({ name: String(file?.basename || file?.id || "Media file") });
+      filesByType.set(kind, files);
     }
-    return `${names.slice(0, limit).join(", ")} + ${names.length - limit} more`;
+    const entries = [
+      { count: performers.length, items: performers, key: "performers", kind: "performers", label: countLabel(performers.length, "performer") },
+      { count: tags.length, items: tags, key: "tags", kind: "tags", label: countLabel(tags.length, "tag") },
+      { count: groups.length, items: groups, key: "groups", kind: "groups", label: countLabel(groups.length, "group") },
+      { count: Number(scene.play_count || 0), items: [], key: "plays", kind: "plays", label: countLabel(Number(scene.play_count || 0), "play") },
+      { count: Number(scene.o_counter || 0), items: [], key: "o-count", kind: "o", label: countLabel(Number(scene.o_counter || 0), "O event") },
+      ...[...filesByType.entries()].map(([kind, files]) => ({
+        count: files.length,
+        items: files,
+        key: `media-${kind}`,
+        kind,
+        label: countLabel(files.length, `${kind} file`),
+      })),
+    ];
+    if (scene.interactive) {
+      entries.push({
+        count: 1,
+        items: [{ name: "Interactive funscript" }],
+        key: "media-funscript",
+        kind: "funscript",
+        label: "1 funscript",
+      });
+    }
+    return entries;
   }
 
   function describeLocalScene(scene = {}) {
-    const files = Array.isArray(scene.files) ? scene.files : [];
-    const mediaKinds = new Set(files.map((file) => file?.video_codec ? "video" : "file"));
-    const mediaLabel = files.length === 1
-      ? `1 ${mediaKinds.has("video") ? "video" : "media"} file`
-      : `${files.length} ${mediaKinds.size === 1 && mediaKinds.has("video") ? "video " : ""}files`;
-    const attributes = [
-      { content: namedValues(scene.performers), key: "performers", label: "Performers" },
-      { content: namedValues(scene.tags), key: "tags", label: "Tags" },
-      { content: namedValues((Array.isArray(scene.groups) ? scene.groups : []).map((entry) => entry?.group)), key: "groups", label: "Groups" },
-      { content: String(scene.play_count ?? 0), key: "plays", label: "Plays" },
-      { content: String(scene.o_counter ?? 0), key: "o-count", label: "O" },
-      { content: mediaLabel, key: "media", label: "Media" },
-    ].filter((attribute) => attribute.content !== "");
-
     return {
-      attributes,
+      countRail: sceneCountRailEntries(scene),
       description: String(scene.details || ""),
       thumbnail: {
         heatmap: scene.paths?.interactive_heatmap || "",
@@ -141,6 +165,18 @@
     const React = PluginApi.React;
     const Apollo = PluginApi.libraries.Apollo;
     const { Nav, Tab, Button } = PluginApi.libraries.Bootstrap;
+    const { FontAwesomeIcon } = PluginApi.libraries.ReactFontAwesome;
+    const {
+      faFile,
+      faFileAudio,
+      faFileCode,
+      faFileVideo,
+      faFolder,
+      faHeart,
+      faPlay,
+      faTag,
+      faUser,
+    } = PluginApi.libraries.FontAwesomeSolid;
     const { NavLink } = PluginApi.libraries.ReactRouterDOM;
     const getClient = PluginApi.utils.StashService.getClient;
     const SharedComponents = root.StashPluginComponents;
@@ -180,6 +216,7 @@
             rating100
             play_count
             o_counter
+            interactive
             play_history
             o_history
             paths {
@@ -187,6 +224,8 @@
               interactive_heatmap
             }
             files {
+              audio_codec
+              basename
               id
               video_codec
             }
@@ -213,6 +252,49 @@
       }
     `;
     const PLUGIN_ID = "stashRecommendations";
+    const countIcons = {
+      audio: faFileAudio,
+      file: faFile,
+      funscript: faFileCode,
+      groups: faFolder,
+      o: faHeart,
+      performers: faUser,
+      plays: faPlay,
+      tags: faTag,
+      video: faFileVideo,
+    };
+
+    function countRailContent(entry) {
+      if (entry.items.length === 0) {
+        return React.createElement("span", null, entry.label);
+      }
+      return React.createElement(
+        "div",
+        { className: "stash-recommendations__count-popover-content" },
+        ...entry.items.map((item, index) => {
+          const href = entry.kind === "performers"
+            ? `/performers/${item.id}`
+            : entry.kind === "tags"
+              ? `/tags/${item.id}`
+              : entry.kind === "groups"
+                ? `/groups/${item.id}`
+                : null;
+          return href
+            ? React.createElement("a", { href, key: item.id || index }, item.name)
+            : React.createElement("span", { key: item.name || index }, item.name);
+        })
+      );
+    }
+
+    function countRail(entries) {
+      return entries.map((entry) => ({
+        content: countRailContent(entry),
+        count: String(entry.count),
+        icon: React.createElement(FontAwesomeIcon, { fixedWidth: true, icon: countIcons[entry.kind] || faFile }),
+        key: entry.key,
+        label: entry.label,
+      }));
+    }
 
     function keyFor(contentKey) {
       return `${contentKey.endpoint}::${contentKey.stash_id}`;
@@ -316,9 +398,9 @@
           return SharedComponents.renderEntityCard(
             { React },
             {
-              attributes: card.attributes,
               badgeRail,
               className: "stash-recommendations__entity-card",
+              countRail: countRail(card.countRail),
               description: card.description,
               footer: props.entry.reasons.length
                 ? React.createElement("span", null, props.entry.reasons.join(", "))
@@ -783,5 +865,6 @@
     recommendationBadgeCells,
     register,
     resolveLocalRecommendations,
+    sceneCountRailEntries,
   };
 });

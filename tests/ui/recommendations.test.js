@@ -14,6 +14,7 @@ const modulePath = path.resolve(
 
 const {
   describeLocalScene,
+  sceneCountRailEntries,
   recommendationBadgeCells,
   fetchForYou,
   fetchRelated,
@@ -55,22 +56,78 @@ test("describeLocalScene maps Stash metadata into generic card data", () => {
     title: "Scene title",
   });
 
-  assert.deepEqual(description, {
-    attributes: [
-      { content: "Performer A, Performer B", key: "performers", label: "Performers" },
-      { content: "Tag A, Tag B", key: "tags", label: "Tags" },
-      { content: "Collection", key: "groups", label: "Groups" },
-      { content: "7", key: "plays", label: "Plays" },
-      { content: "3", key: "o-count", label: "O" },
-      { content: "2 video files", key: "media", label: "Media" },
-    ],
-    description: "A scene description.",
-    thumbnail: { heatmap: "/scene/1/heatmap", screenshot: "/scene/1/screenshot" },
-    title: "Scene title",
-  });
+  assert.equal(description.attributes, undefined);
+  assert.equal(description.countRail.find((entry) => entry.key === "performers").count, 2);
+  assert.equal(description.countRail.find((entry) => entry.key === "media-video").label, "2 video files");
+  assert.equal(description.description, "A scene description.");
+  assert.deepEqual(description.thumbnail, { heatmap: "/scene/1/heatmap", screenshot: "/scene/1/screenshot" });
+  assert.equal(description.title, "Scene title");
 });
 
-test("describeLocalScene summarizes high-cardinality metadata for compact cards", () => {
+test("sceneCountRailEntries preserves entity details and splits media by type", () => {
+  const entries = sceneCountRailEntries({
+    files: [
+      { basename: "scene-a.mp4", video_codec: "h264" },
+      { basename: "scene-b.mkv", video_codec: "hevc" },
+      { audio_codec: "flac", basename: "audio.flac" },
+    ],
+    groups: [{ group: { id: "group-1", name: "Collection" } }],
+    interactive: true,
+    o_counter: 3,
+    performers: [{ id: "performer-1", name: "Performer A" }, { id: "performer-2", name: "Performer B" }],
+    play_count: 7,
+    tags: [{ id: "tag-1", name: "Tag A" }, { id: "tag-2", name: "Tag B" }],
+  });
+
+  assert.deepEqual(entries, [
+    {
+      count: 2,
+      items: [{ id: "performer-1", name: "Performer A" }, { id: "performer-2", name: "Performer B" }],
+      key: "performers",
+      kind: "performers",
+      label: "2 performers",
+    },
+    {
+      count: 2,
+      items: [{ id: "tag-1", name: "Tag A" }, { id: "tag-2", name: "Tag B" }],
+      key: "tags",
+      kind: "tags",
+      label: "2 tags",
+    },
+    {
+      count: 1,
+      items: [{ id: "group-1", name: "Collection" }],
+      key: "groups",
+      kind: "groups",
+      label: "1 group",
+    },
+    { count: 7, items: [], key: "plays", kind: "plays", label: "7 plays" },
+    { count: 3, items: [], key: "o-count", kind: "o", label: "3 O events" },
+    {
+      count: 2,
+      items: [{ name: "scene-a.mp4" }, { name: "scene-b.mkv" }],
+      key: "media-video",
+      kind: "video",
+      label: "2 video files",
+    },
+    {
+      count: 1,
+      items: [{ name: "audio.flac" }],
+      key: "media-audio",
+      kind: "audio",
+      label: "1 audio file",
+    },
+    {
+      count: 1,
+      items: [{ name: "Interactive funscript" }],
+      key: "media-funscript",
+      kind: "funscript",
+      label: "1 funscript",
+    },
+  ]);
+});
+
+test("describeLocalScene keeps every high-cardinality entity available to the count popover", () => {
   const description = describeLocalScene({
     files: [],
     groups: [{ group: { name: "Collection A" } }, { group: { name: "Collection B" } }, { group: { name: "Collection C" } }, { group: { name: "Collection D" } }],
@@ -78,9 +135,11 @@ test("describeLocalScene summarizes high-cardinality metadata for compact cards"
     tags: [{ name: "Tag A" }, { name: "Tag B" }, { name: "Tag C" }, { name: "Tag D" }, { name: "Tag E" }],
   });
 
-  assert.equal(description.attributes.find((attribute) => attribute.key === "performers").content, "Performer A, Performer B, Performer C + 1 more");
-  assert.equal(description.attributes.find((attribute) => attribute.key === "tags").content, "Tag A, Tag B, Tag C + 2 more");
-  assert.equal(description.attributes.find((attribute) => attribute.key === "groups").content, "Collection A, Collection B, Collection C + 1 more");
+  assert.equal(description.countRail.find((entry) => entry.key === "performers").count, 4);
+  assert.equal(description.countRail.find((entry) => entry.key === "tags").count, 5);
+  assert.equal(description.countRail.find((entry) => entry.key === "groups").count, 4);
+  assert.equal(description.countRail.find((entry) => entry.key === "performers").items.at(-1).name, "Performer D");
+  assert.equal(description.countRail.find((entry) => entry.key === "tags").items.at(-1).name, "Tag E");
 });
 
 test("partitionRecommendations separates watched, unwatched, and remote candidates", () => {
@@ -329,8 +388,9 @@ test("For You maps local scenes into the generic entity card surface", () => {
   routes.find((entry) => entry.path === "/plugins/stash-recommendations").component({});
 
   assert.equal(cards.length, 1);
-  assert.equal(cards[0].attributes.find((attribute) => attribute.key === "performers").content, "Performer");
-  assert.equal(cards[0].attributes.find((attribute) => attribute.key === "o-count").content, "2");
+  assert.equal(cards[0].attributes, undefined);
+  assert.equal(cards[0].countRail.find((entry) => entry.key === "performers").count, "1");
+  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").count, "2");
   assert.equal(cards[0].thumbnail.overlay.props.src, "/scene/44/heatmap");
   assert.equal(cards[0].header, undefined);
   assert.deepEqual(
@@ -370,6 +430,20 @@ function registerUi(state, StashPluginComponents) {
         Nav: { Item: "nav-item", Link: "nav-link" },
         Tab: { Pane: "tab-pane" },
         Button: "button",
+      },
+      FontAwesomeSolid: {
+        faFile: "file",
+        faFileAudio: "file-audio",
+        faFileCode: "file-code",
+        faFileVideo: "file-video",
+        faFolder: "folder",
+        faHeart: "heart",
+        faPlay: "play",
+        faTag: "tag",
+        faUser: "user",
+      },
+      ReactFontAwesome: {
+        FontAwesomeIcon: "font-awesome-icon",
       },
       ReactRouterDOM: {
         NavLink: "nav-link",
