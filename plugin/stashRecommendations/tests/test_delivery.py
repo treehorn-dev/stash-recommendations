@@ -146,6 +146,7 @@ def test_deliver_outbox_logs_start_and_summary(tmp_path: Path, monkeypatch: obje
         "paused": False,
     }
     captured = capsys.readouterr().err
+    assert "task mode=deliver-outbox" in captured
     assert "delivery start pending={'rating': 1, 'play': 0, 'o': 0, 'snapshot': 0, 'hook': 0}" in captured
     assert "delivery finished delivered=1 retried=0 quarantined=0 paused=False" in captured
 

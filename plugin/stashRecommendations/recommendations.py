@@ -38,6 +38,7 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
     args = dict(plugin_input.get("args", {}))
     server_connection = dict(plugin_input.get("server_connection", {}))
     mode = str(args.get("mode", "status"))
+    _task_log(f"task mode={mode}")
     database_path = _plugin_dir(server_connection) / "recommendations.sqlite3"
     outbox = Outbox(database_path)
     stash = StashClient(server_connection)
