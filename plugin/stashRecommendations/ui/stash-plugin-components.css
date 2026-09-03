@@ -166,7 +166,27 @@
   gap: 0.75rem;
   overflow: hidden;
   padding: 0.75rem;
+  position: relative;
   text-decoration: none;
+}
+
+.stash-composables-entity-card--with-badge-rail {
+  padding-left: 3.25rem;
+}
+
+.stash-composables-entity-card__badge-rail {
+  align-items: stretch;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  justify-content: flex-start;
+  left: 0;
+  padding: 0.5rem 0.25rem;
+  position: absolute;
+  top: 0;
+  width: 3rem;
+  z-index: 1;
 }
 
 .stash-composables-entity-card:hover {

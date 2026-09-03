@@ -63,6 +63,41 @@
   border-style: dashed;
 }
 
+.stash-recommendations__badge-cells {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stash-recommendations__badge-cell {
+  align-items: center;
+  border-radius: 0.25rem;
+  display: flex;
+  font-size: 0.75rem;
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1;
+  min-height: 2rem;
+  padding: 0.25rem;
+  text-align: center;
+}
+
+.stash-recommendations__badge-cell--rating {
+  background: rgba(57, 157, 103, 0.84);
+  color: #fff;
+}
+
+.stash-recommendations__badge-cell--new {
+  background: rgba(211, 158, 0, 0.24);
+  color: var(--bs-warning, #d39e00);
+}
+
+.stash-recommendations__badge-cell--remote {
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+}
+
 .stash-recommendations__entity-title {
   color: inherit;
   text-decoration: none;
