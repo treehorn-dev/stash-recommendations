@@ -36,6 +36,7 @@ var migrations = []migration{
 	{version: "008_source_catalog_groups", path: "migrations/008_source_catalog_groups.sql"},
 	{version: "009_pgvector_recommendations", path: "migrations/009_pgvector_recommendations.sql"},
 	{version: "010_predicted_ratings", path: "migrations/010_predicted_ratings.sql"},
+	{version: "011_model_account_profiles", path: "migrations/011_model_account_profiles.sql"},
 }
 
 var ErrInvalidAPIKey = errors.New("invalid API key")

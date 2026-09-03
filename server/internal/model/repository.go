@@ -296,6 +296,9 @@ func (repository *Repository) SaveAndActivateVectors(ctx context.Context, projec
 	if err := insertSceneVectors(ctx, tx, versionID, projection.SceneVectors); err != nil {
 		return "", err
 	}
+	if err := insertAccountProfiles(ctx, tx, versionID, projection.Profiles); err != nil {
+		return "", err
+	}
 	if err := insertProfileRecommendations(ctx, tx, versionID, projection.Profiles); err != nil {
 		return "", err
 	}
@@ -312,6 +315,22 @@ func (repository *Repository) SaveAndActivateVectors(ctx context.Context, projec
 		return "", fmt.Errorf("commit vector recommendation projection: %w", err)
 	}
 	return versionID, nil
+}
+
+func insertAccountProfiles(ctx context.Context, tx pgx.Tx, versionID string, profiles []AccountProfile) error {
+	for _, profile := range profiles {
+		reasons, err := json.Marshal(profile.Reasons)
+		if err != nil {
+			return fmt.Errorf("encode account profile reasons: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO model_account_profiles (model_version_id, account_id, embedding, reasons)
+			VALUES ($1, $2, $3::vector, $4)
+		`, versionID, profile.AccountID, vectorLiteral(profile.Embedding), reasons); err != nil {
+			return fmt.Errorf("insert account profile: %w", err)
+		}
+	}
+	return nil
 }
 
 func insertSceneVectors(ctx context.Context, tx pgx.Tx, versionID string, vectors []SceneEmbedding) error {
@@ -532,19 +551,23 @@ func (repository *Repository) Related(ctx context.Context, accountID string, sou
 	`, version, accountID, source.Endpoint, source.StashID, normalizeLimit(limit), maxRatingNeighbors, minimumRatingsForPrediction, ratingPredictionPriorWeight)
 }
 
-func (repository *Repository) ForYou(ctx context.Context, accountID string, limit int) ([]Recommendation, string, error) {
+func (repository *Repository) ForYou(ctx context.Context, accountID string, limit, offset int) ([]Recommendation, string, error) {
 	version, found, err := repository.activeVersion(ctx)
 	if err != nil || !found {
 		return nil, version, err
 	}
 	return repository.readRecommendations(ctx, `
-		SELECT source_endpoint, source_stash_id, score, reasons
-			, predicted_rating
-		FROM user_recommendations
-		WHERE model_version_id = $1 AND account_id = $2
-		ORDER BY score DESC, source_endpoint, source_stash_id
+		SELECT candidates.endpoint, candidates.stash_id,
+			1 - (candidates.embedding <=> profile.embedding) AS score,
+			profile.reasons
+		FROM model_account_profiles AS profile
+		JOIN model_scene_vectors AS candidates
+			ON candidates.model_version_id = profile.model_version_id
+		WHERE profile.model_version_id = $1 AND profile.account_id = $2
+		ORDER BY candidates.embedding <=> profile.embedding, candidates.endpoint, candidates.stash_id
 		LIMIT $3
-	`, version, accountID, normalizeLimit(limit))
+		OFFSET $4
+	`, version, accountID, normalizeLimit(limit), max(offset, 0))
 }
 
 func (repository *Repository) activeVersion(ctx context.Context) (string, bool, error) {
