@@ -17,8 +17,6 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
-const profileRecommendationLimit = 5000
-
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
@@ -299,9 +297,6 @@ func (repository *Repository) SaveAndActivateVectors(ctx context.Context, projec
 	if err := insertAccountProfiles(ctx, tx, versionID, projection.Profiles); err != nil {
 		return "", err
 	}
-	if err := insertProfileRecommendations(ctx, tx, versionID, projection.Profiles); err != nil {
-		return "", err
-	}
 	if _, err := tx.Exec(ctx, `UPDATE model_versions SET active = false WHERE active`); err != nil {
 		return "", fmt.Errorf("deactivate prior model version: %w", err)
 	}
@@ -349,102 +344,6 @@ func insertSceneVectors(ctx context.Context, tx pgx.Tx, versionID string, vector
 		}
 	}
 	return nil
-}
-
-func insertProfileRecommendations(ctx context.Context, tx pgx.Tx, versionID string, profiles []AccountProfile) error {
-	for _, profile := range profiles {
-		rows, err := tx.Query(ctx, `
-			SELECT endpoint, stash_id, 1 - (embedding <=> $2::vector) AS score
-			FROM model_scene_vectors
-			WHERE model_version_id = $1
-			ORDER BY embedding <=> $2::vector, endpoint, stash_id
-			LIMIT $3
-		`, versionID, vectorLiteral(profile.Embedding), profileRecommendationLimit)
-		if err != nil {
-			return fmt.Errorf("query profile candidates: %w", err)
-		}
-		var candidates []struct {
-			key   domain.ContentKey
-			score float64
-		}
-		for rows.Next() {
-			var key domain.ContentKey
-			var score float64
-			if err := rows.Scan(&key.Endpoint, &key.StashID, &score); err != nil {
-				rows.Close()
-				return fmt.Errorf("scan profile candidate: %w", err)
-			}
-			candidates = append(candidates, struct {
-				key   domain.ContentKey
-				score float64
-			}{key: key, score: score})
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return fmt.Errorf("iterate profile candidates: %w", err)
-		}
-		rows.Close()
-
-		reasons, err := json.Marshal(profile.Reasons)
-		if err != nil {
-			return fmt.Errorf("encode profile reasons: %w", err)
-		}
-		for _, candidate := range candidates {
-			prediction, err := personalRatingForCandidate(ctx, tx, versionID, profile.AccountID, candidate.key)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO user_recommendations (model_version_id, account_id, source_endpoint, source_stash_id, score, reasons, predicted_rating)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)
-			`, versionID, profile.AccountID, candidate.key.Endpoint, candidate.key.StashID, candidate.score, reasons, prediction); err != nil {
-				return fmt.Errorf("insert profile recommendation: %w", err)
-			}
-		}
-	}
-	return nil
-}
-
-// personalRatingForCandidate keeps nearest-neighbor work bounded and stores a
-// normalized score. The public response converts it to Stash's five-point UI.
-func personalRatingForCandidate(ctx context.Context, tx pgx.Tx, versionID, accountID string, candidate domain.ContentKey) (*float64, error) {
-	var prediction *float64
-	err := tx.QueryRow(ctx, `
-		WITH candidate AS (
-			SELECT embedding
-			FROM model_scene_vectors
-			WHERE model_version_id = $1 AND endpoint = $3 AND stash_id = $4
-		), rated AS (
-			SELECT preferences.rating, vectors.embedding
-			FROM current_preferences AS preferences
-			JOIN model_scene_vectors AS vectors
-				ON vectors.model_version_id = $1
-				AND vectors.endpoint = preferences.endpoint
-				AND vectors.stash_id = preferences.stash_id
-			WHERE preferences.account_id = $2
-		), baseline AS (
-			SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean
-			FROM rated
-		), nearest AS (
-			SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> candidate.embedding)) AS similarity
-			FROM rated
-			CROSS JOIN candidate
-			ORDER BY rated.embedding <=> candidate.embedding
-			LIMIT $5
-		)
-		SELECT CASE
-			WHEN baseline.rating_count < $6 THEN NULL
-			ELSE ($7 * baseline.account_mean + COALESCE(SUM(nearest.similarity * nearest.rating), 0))
-				/ ($7 + COALESCE(SUM(nearest.similarity), 0))
-		END
-		FROM baseline
-		LEFT JOIN nearest ON true
-		GROUP BY baseline.rating_count, baseline.account_mean
-	`, versionID, accountID, candidate.Endpoint, candidate.StashID, maxRatingNeighbors, minimumRatingsForPrediction, ratingPredictionPriorWeight).Scan(&prediction)
-	if err != nil {
-		return nil, fmt.Errorf("predict personal rating: %w", err)
-	}
-	return prediction, nil
 }
 
 func (repository *Repository) SaveAndActivate(ctx context.Context, projection Projection) (string, error) {
@@ -501,7 +400,7 @@ func (repository *Repository) SaveAndActivate(ctx context.Context, projection Pr
 	return versionID, nil
 }
 
-func (repository *Repository) Related(ctx context.Context, accountID string, source domain.ContentKey, limit int) ([]Recommendation, string, error) {
+func (repository *Repository) Related(ctx context.Context, source domain.ContentKey, limit int) ([]Recommendation, string, error) {
 	version, found, err := repository.activeVersion(ctx)
 	if err != nil || !found {
 		return nil, version, err
@@ -510,45 +409,18 @@ func (repository *Repository) Related(ctx context.Context, accountID string, sou
 		WITH source AS (
 			SELECT embedding
 			FROM model_scene_vectors
-			WHERE model_version_id = $1 AND endpoint = $3 AND stash_id = $4
-		), rated AS (
-			SELECT preferences.rating, vectors.embedding
-			FROM current_preferences AS preferences
-			JOIN model_scene_vectors AS vectors
-				ON vectors.model_version_id = $1
-				AND vectors.endpoint = preferences.endpoint
-				AND vectors.stash_id = preferences.stash_id
-			WHERE preferences.account_id = $2
-		), baseline AS (
-			SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean
-			FROM rated
+			WHERE model_version_id = $1 AND endpoint = $2 AND stash_id = $3
 		)
 		SELECT candidates.endpoint, candidates.stash_id,
 			1 - (candidates.embedding <=> source.embedding) AS score,
-			'["content_similarity"]'::jsonb AS reasons,
-			CASE
-				WHEN baseline.rating_count < $7 THEN NULL
-				ELSE ($8 * baseline.account_mean + COALESCE(evidence.weighted_ratings, 0))
-					/ ($8 + COALESCE(evidence.weight, 0))
-			END AS predicted_rating
+			'["content_similarity"]'::jsonb AS reasons
 		FROM model_scene_vectors AS candidates
 		CROSS JOIN source
-		CROSS JOIN baseline
-		LEFT JOIN LATERAL (
-			SELECT SUM(nearest.similarity * nearest.rating) AS weighted_ratings,
-				SUM(nearest.similarity) AS weight
-			FROM (
-				SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> candidates.embedding)) AS similarity
-				FROM rated
-				ORDER BY rated.embedding <=> candidates.embedding
-				LIMIT $6
-			) AS nearest
-		) AS evidence ON true
 		WHERE candidates.model_version_id = $1
-			AND (candidates.endpoint, candidates.stash_id) <> ($3, $4)
+			AND (candidates.endpoint, candidates.stash_id) <> ($2, $3)
 		ORDER BY candidates.embedding <=> source.embedding, candidates.endpoint, candidates.stash_id
-		LIMIT $5
-	`, version, accountID, source.Endpoint, source.StashID, normalizeLimit(limit), maxRatingNeighbors, minimumRatingsForPrediction, ratingPredictionPriorWeight)
+		LIMIT $4
+	`, version, source.Endpoint, source.StashID, normalizeLimit(limit))
 }
 
 func (repository *Repository) ForYou(ctx context.Context, accountID string, limit, offset int) ([]Recommendation, string, error) {
@@ -592,19 +464,17 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 	// The selected content key is the first two columns. Canonical URLs are
 	// fetched separately so absent catalog metadata remains a valid result.
 	var raw []struct {
-		key             domain.ContentKey
-		score           float64
-		reasons         []byte
-		predictedRating *float64
+		key     domain.ContentKey
+		score   float64
+		reasons []byte
 	}
 	for rows.Next() {
 		var row struct {
-			key             domain.ContentKey
-			score           float64
-			reasons         []byte
-			predictedRating *float64
+			key     domain.ContentKey
+			score   float64
+			reasons []byte
 		}
-		if err := rows.Scan(&row.key.Endpoint, &row.key.StashID, &row.score, &row.reasons, &row.predictedRating); err != nil {
+		if err := rows.Scan(&row.key.Endpoint, &row.key.StashID, &row.score, &row.reasons); err != nil {
 			return nil, "", fmt.Errorf("scan recommendation: %w", err)
 		}
 		raw = append(raw, row)
@@ -624,11 +494,7 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 		if err != nil {
 			return nil, "", err
 		}
-		if row.predictedRating != nil {
-			fivePoint := *row.predictedRating * 5
-			row.predictedRating = &fivePoint
-		}
-		items = append(items, Recommendation{ContentKey: row.key, Score: row.score, Reasons: reasons, ModelVersion: version, CanonicalURL: canonicalURL, PredictedRating: row.predictedRating})
+		items = append(items, Recommendation{ContentKey: row.key, Score: row.score, Reasons: reasons, ModelVersion: version, CanonicalURL: canonicalURL})
 	}
 	return items, version, nil
 }
