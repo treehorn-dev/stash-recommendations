@@ -35,7 +35,7 @@ func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T
 	require.NoError(t, err)
 	require.Zero(t, materializedRecommendationCount)
 
-	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, contentKey("scene-a"), 10)
+	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("scene-a"), 10)
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
 	require.Equal(t, []string{"scene-b"}, recommendationIDs(items))
@@ -64,7 +64,7 @@ func TestBuildPersistsBehavioralOnlySessionScene(t *testing.T) {
 
 	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
-	items, _, err := NewRepository(repository.Pool()).Related(ctx, contentKey("metadata"), 10)
+	items, _, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("metadata"), 10)
 	require.NoError(t, err)
 	require.Contains(t, recommendationIDs(items), "behavioral")
 }
@@ -189,7 +189,7 @@ func TestFailedBuildKeepsActiveVersion(t *testing.T) {
 	_, err = builder.BuildAndActivate(ctx)
 	require.ErrorContains(t, err, "forced model build failure")
 
-	_, actualActiveVersion, err := NewRepository(repository.Pool()).Related(ctx, contentKey("scene-a"), 10)
+	_, actualActiveVersion, err := NewRepository(repository.Pool()).Related(ctx, accountID, contentKey("scene-a"), 10)
 	require.NoError(t, err)
 	require.Equal(t, activeVersion, actualActiveVersion)
 }

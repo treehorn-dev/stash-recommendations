@@ -294,7 +294,7 @@ func (repository *Repository) SaveAndActivateVectors(ctx context.Context, projec
 	if err := insertSceneVectors(ctx, tx, versionID, projection.SceneVectors); err != nil {
 		return "", err
 	}
-	if err := insertProfileRecommendations(ctx, tx, versionID, projection.Profiles); err != nil {
+	if err := insertAccountProfiles(ctx, tx, versionID, projection.Profiles); err != nil {
 		return "", err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE model_versions SET active = false WHERE active`); err != nil {
@@ -310,6 +310,19 @@ func (repository *Repository) SaveAndActivateVectors(ctx context.Context, projec
 		return "", fmt.Errorf("commit vector recommendation projection: %w", err)
 	}
 	return versionID, nil
+}
+
+func insertAccountProfiles(ctx context.Context, tx pgx.Tx, versionID string, profiles []AccountProfile) error {
+	for _, profile := range profiles {
+		reasons, err := json.Marshal(profile.Reasons)
+		if err != nil {
+			return fmt.Errorf("encode account profile reasons: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_account_profiles (model_version_id, account_id, embedding, reasons) VALUES ($1, $2, $3::vector, $4)`, versionID, profile.AccountID, vectorLiteral(profile.Embedding), reasons); err != nil {
+			return fmt.Errorf("insert account profile: %w", err)
+		}
+	}
+	return nil
 }
 
 func insertSceneVectors(ctx context.Context, tx pgx.Tx, versionID string, vectors []SceneEmbedding) error {
