@@ -38,12 +38,26 @@ test("recommendation cards present count controls in a separated native-style ra
   assert.match(css, /\.stash-recommendations__entity-card\s+\.stash-composables-entity-card__count-trigger\s*\{[^}]*background:/s);
 });
 
-test("recommendation cards keep heatmaps below posters and score provenance visually distinct", () => {
+test("recommendation cards use native scene-card heatmap and overlay placement", () => {
   const css = fs.readFileSync(
     path.resolve(__dirname, "..", "..", "plugin", "stashRecommendations", "ui", "recommendations.css"),
     "utf8"
   );
 
-  assert.match(css, /\.stash-recommendations__entity-card\s+\.stash-composables-entity-card__media-rail\s*\{[^}]*margin-top:/s);
+  assert.match(css, /\.stash-recommendations__entity-card\s+\.stash-composables-entity-card__media-rail\s*\{[^}]*margin-top:\s*0/s);
+  assert.match(css, /\.stash-recommendations__heatmap\s*\{[^}]*height:\s*auto[^}]*width:\s*100%/s);
+  assert.match(css, /\.stash-recommendations__poster-overlay--studio\s*\{[^}]*right:\s*0\.7rem[^}]*top:\s*0\.7rem/s);
+  assert.match(css, /\.stash-recommendations__poster-overlay--duration\s*\{[^}]*bottom:\s*1rem[^}]*right:\s*0\.7rem/s);
+  assert.match(css, /\.stash-recommendations__poster-overlay--speed\s*\{[^}]*bottom:\s*1rem[^}]*left:\s*0\.7rem/s);
+});
+
+test("recommendation cards retain outline score semantics", () => {
+  const css = fs.readFileSync(
+    path.resolve(__dirname, "..", "..", "plugin", "stashRecommendations", "ui", "recommendations.css"),
+    "utf8"
+  );
+
   assert.match(css, /\.stash-recommendations__badge-cell--score:not\(\.stash-recommendations__badge-cell--local\)\s*\{[^}]*background:\s*transparent/s);
+  assert.match(css, /\.stash-recommendations__badge-cell--rating-100-18\s*\{[^}]*#ff4812/s);
+  assert.match(css, /\.stash-recommendations__badge-cell--rating-100-2\s*\{[^}]*#9e8974/s);
 });

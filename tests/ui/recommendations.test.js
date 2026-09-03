@@ -14,6 +14,7 @@ const modulePath = path.resolve(
 
 const {
   describeLocalScene,
+  formatRecommendationReasons,
   sceneCountRailEntries,
   recommendationBadgeCells,
   fetchForYou,
@@ -21,6 +22,18 @@ const {
   partitionRecommendations,
   resolveLocalRecommendations,
 } = require(modulePath);
+
+test("formatRecommendationReasons turns model reason codes into one user-facing explanation", () => {
+  assert.equal(
+    formatRecommendationReasons(["o_profile", "play_profile", "rating_profile"]),
+    "Why: based on your ratings, watch history, and O history"
+  );
+  assert.equal(
+    formatRecommendationReasons(["content_similarity"]),
+    "Why: similar content"
+  );
+  assert.equal(formatRecommendationReasons([]), "");
+});
 
 test("recommendationBadgeCells prefers a local rating and identifies unwatched scenes as new", () => {
   assert.deepEqual(
@@ -30,7 +43,7 @@ test("recommendationBadgeCells prefers a local rating and identifies unwatched s
       scene: { rating100: 90 },
     }),
     [
-      { kind: "score", label: "Your rating", source: "local", tone: "red", value: "4.5" },
+      { kind: "score", label: "Your rating", source: "local", tone: "rating-100-18", value: "4.5" },
       { kind: "new", label: "New" },
     ]
   );
@@ -39,11 +52,11 @@ test("recommendationBadgeCells prefers a local rating and identifies unwatched s
 test("recommendationBadgeCells uses outline semantics for predicted and public scores", () => {
   assert.deepEqual(
     recommendationBadgeCells({ item: { predicted_rating: 3.1, watched: true }, kind: "local", scene: {} }),
-    [{ kind: "score", label: "Predicted rating", source: "predicted", tone: "orange", value: "3.1" }]
+    [{ kind: "score", label: "Predicted rating", source: "predicted", tone: "rating-100-12", value: "3.1" }]
   );
   assert.deepEqual(
     recommendationBadgeCells({ item: { public_rating: 1.5, watched: true }, kind: "local", scene: {} }),
-    [{ kind: "score", label: "Public average rating", source: "public", tone: "yellow", value: "1.5" }]
+    [{ kind: "score", label: "Public average rating", source: "public", tone: "rating-100-6", value: "1.5" }]
   );
 });
 
@@ -82,6 +95,16 @@ test("describeLocalScene maps Stash metadata into generic card data", () => {
   assert.equal(description.interactiveSpeed, 140);
   assert.deepEqual(description.studio, { id: "studio-1", name: "Studio One" });
   assert.equal(description.title, "Scene title");
+});
+
+test("describeLocalScene exposes a heatmap only for scenes with interactive speed", () => {
+  const description = describeLocalScene({
+    interactive: true,
+    interactive_speed: 0,
+    paths: { interactive_heatmap: "/scene/1/heatmap" },
+  });
+
+  assert.equal(description.thumbnail.heatmap, "");
 });
 
 test("sceneCountRailEntries preserves entity details and splits media by type", () => {
@@ -434,6 +457,10 @@ test("For You maps local scenes into the generic entity card surface", () => {
   assert.equal(cards[0].thumbnail.previewSrc, "/scene/44/preview");
   assert.equal(cards[0].mediaRail.props.src, "/scene/44/heatmap");
   assert.equal(cards[0].thumbnail.overlay.props.className, "stash-recommendations__poster-overlays");
+  assert.equal(cards[0].thumbnail.overlay.props.children[0].props.className, "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--studio");
+  assert.equal(cards[0].thumbnail.overlay.props.children[1].props.children, "1:02:03");
+  assert.equal(cards[0].thumbnail.overlay.props.children[2].props.children, 140);
+  assert.equal(cards[0].footer.props.children, "Why: watch history");
   assert.equal(cards[0].header, undefined);
   assert.deepEqual(
     cards[0].badgeRail.props.children.map((cell) => ({
@@ -443,7 +470,7 @@ test("For You maps local scenes into the generic entity card surface", () => {
     })),
     [
       {
-        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--score stash-recommendations__badge-cell--local stash-recommendations__badge-cell--red",
+        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--score stash-recommendations__badge-cell--local stash-recommendations__badge-cell--rating-100-18",
         title: "Your rating",
         value: "4.5",
       },

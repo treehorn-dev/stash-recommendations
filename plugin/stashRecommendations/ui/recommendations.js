@@ -76,11 +76,8 @@
     }
 
     function scoreTone(score) {
-      if (score <= 1) return "beige";
-      if (score <= 2) return "yellow";
-      if (score <= 3) return "gold";
-      if (score <= 4) return "orange";
-      return "red";
+      // Match Stash's RatingBanner class selection: rating100 / 5, truncated.
+      return `rating-100-${Math.trunc(Math.max(0, Math.min(100, score * 20)) / 5)}`;
     }
 
     function scoreCell(label, source, score) {
@@ -118,6 +115,26 @@
       model_version: String(output.model_version || ""),
       items: Array.isArray(output.items) ? output.items : [],
     };
+  }
+
+  function formatRecommendationReasons(reasons) {
+    const labels = {
+      content_similarity: "similar content",
+      o_profile: "O history",
+      play_profile: "watch history",
+      rating_profile: "your ratings",
+      session_cooccurrence: "what you watch together",
+    };
+    const priority = ["rating_profile", "play_profile", "o_profile", "session_cooccurrence", "content_similarity"];
+    const known = new Set(Array.isArray(reasons) ? reasons.map(String) : []);
+    const values = priority.filter((reason) => known.delete(reason)).map((reason) => labels[reason]);
+    for (const reason of known) {
+      values.push(reason.replace(/_/g, " "));
+    }
+    if (!values.length) return "";
+    if (values.length === 1) return `Why: ${values[0]}`;
+    const last = values.pop();
+    return `Why: based on ${values.join(", ")}, and ${last}`;
   }
 
   function namedItems(values) {
@@ -194,7 +211,7 @@
       interactiveSpeed: Number.isFinite(Number(scene.interactive_speed)) ? Number(scene.interactive_speed) : null,
       studio,
       thumbnail: {
-        heatmap: scene.paths?.interactive_heatmap || "",
+        heatmap: Number(scene.interactive_speed) > 0 ? (scene.paths?.interactive_heatmap || "") : "",
         preview: scene.paths?.preview || "",
         screenshot: scene.paths?.screenshot || "",
       },
@@ -472,7 +489,7 @@
               ? React.createElement(
                   "span",
                   { className: "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--speed" },
-                  `${card.interactiveSpeed} BPM`
+                  card.interactiveSpeed
                 )
               : null
           );
@@ -483,8 +500,8 @@
               className: "stash-recommendations__entity-card",
               countRail: countRail(card.countRail),
               description: card.description,
-              footer: props.entry.reasons.length
-                ? React.createElement("span", null, props.entry.reasons.join(", "))
+              footer: formatRecommendationReasons(props.entry.reasons)
+                ? React.createElement("span", null, formatRecommendationReasons(props.entry.reasons))
                 : null,
               mediaRail: heatmap,
               style: watched ? undefined : { borderColor: "var(--bs-warning, #d39e00)" },
@@ -511,8 +528,8 @@
           {
             badgeRail,
             className: "stash-recommendations__entity-card stash-recommendations__entity-card--remote",
-            footer: props.entry.reasons.length
-              ? React.createElement("span", null, props.entry.reasons.join(", "))
+            footer: formatRecommendationReasons(props.entry.reasons)
+              ? React.createElement("span", null, formatRecommendationReasons(props.entry.reasons))
               : null,
             style: {
               backgroundColor: "rgba(255, 255, 255, 0.02)",
@@ -552,7 +569,7 @@
           React.createElement(
             "div",
             { className: "stash-recommendations__card-meta" },
-            props.entry.reasons.join(", ")
+            formatRecommendationReasons(props.entry.reasons)
           )
         );
       }
@@ -568,7 +585,7 @@
         React.createElement(
           "div",
           { className: "stash-recommendations__card-meta" },
-          props.entry.reasons.join(", ")
+          formatRecommendationReasons(props.entry.reasons)
         )
       );
     }
@@ -950,6 +967,7 @@
     describeLocalScene,
     fetchForYou,
     fetchRelated,
+    formatRecommendationReasons,
     partitionRecommendations,
     recommendationBadgeCells,
     register,
