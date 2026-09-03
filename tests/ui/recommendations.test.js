@@ -127,6 +127,22 @@ test("sceneCountRailEntries preserves entity details and splits media by type", 
   ]);
 });
 
+test("sceneCountRailEntries preserves zero-count categories for card presentation policy", () => {
+  const entries = sceneCountRailEntries({
+    files: [],
+    groups: [],
+    o_counter: 0,
+    performers: [],
+    play_count: 0,
+    tags: [],
+  });
+
+  assert.deepEqual(
+    entries.map((entry) => [entry.key, entry.count]),
+    [["performers", 0], ["tags", 0], ["groups", 0], ["plays", 0], ["o-count", 0]]
+  );
+});
+
 test("describeLocalScene keeps every high-cardinality entity available to the count popover", () => {
   const description = describeLocalScene({
     files: [],
@@ -389,6 +405,7 @@ test("For You maps local scenes into the generic entity card surface", () => {
 
   assert.equal(cards.length, 1);
   assert.equal(cards[0].attributes, undefined);
+  assert.equal(cards[0].showZeroCounts, false);
   assert.equal(cards[0].countRail.find((entry) => entry.key === "performers").count, "1");
   assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").count, "2");
   assert.equal(cards[0].thumbnail.overlay.props.src, "/scene/44/heatmap");
