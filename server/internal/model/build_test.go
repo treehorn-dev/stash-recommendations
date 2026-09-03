@@ -26,12 +26,13 @@ func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T
 	versionID, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
 
-	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, contentKey("scene-a"), 10)
+	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("scene-a"), 10)
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
 	require.Equal(t, []string{"scene-b"}, recommendationIDs(items))
 	require.Contains(t, reasonsFor(items, "scene-b"), "content_similarity")
 	require.Nil(t, items[0].CanonicalURL)
+	require.Nil(t, items[0].PredictedRating)
 
 	forYou, activeVersion, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
 	require.NoError(t, err)
@@ -50,7 +51,7 @@ func TestBuildPersistsBehavioralOnlySessionScene(t *testing.T) {
 
 	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
-	items, _, err := NewRepository(repository.Pool()).Related(ctx, contentKey("metadata"), 10)
+	items, _, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("metadata"), 10)
 	require.NoError(t, err)
 	require.Contains(t, recommendationIDs(items), "behavioral")
 }
@@ -69,6 +70,31 @@ func TestBuildPersistsPredictedRatingForForYou(t *testing.T) {
 	require.NoError(t, err)
 
 	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
+	require.NoError(t, err)
+	for _, item := range items {
+		if item.ContentKey.StashID != "candidate" {
+			continue
+		}
+		require.NotNil(t, item.PredictedRating)
+		require.InDelta(t, 5, *item.PredictedRating, 0.01)
+		return
+	}
+	t.Fatal("expected candidate recommendation")
+}
+
+func TestRelatedReturnsPersonalPredictedRating(t *testing.T) {
+	repository, pool := openModelTestStore(t)
+	ctx := context.Background()
+	account := seedModelAccount(t, pool)
+
+	seedSharedTagScenes(t, pool, "rating-1", "rating-2", "rating-3", "rating-4", "rating-5", "candidate")
+	for _, stashID := range []string{"rating-1", "rating-2", "rating-3", "rating-4", "rating-5"} {
+		seedRating(t, pool, account, stashID, 1)
+	}
+	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
+	require.NoError(t, err)
+
+	items, _, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("rating-1"), 10)
 	require.NoError(t, err)
 	for _, item := range items {
 		if item.ContentKey.StashID != "candidate" {
@@ -150,7 +176,7 @@ func TestFailedBuildKeepsActiveVersion(t *testing.T) {
 	_, err = builder.BuildAndActivate(ctx)
 	require.ErrorContains(t, err, "forced model build failure")
 
-	_, actualActiveVersion, err := NewRepository(repository.Pool()).Related(ctx, contentKey("scene-a"), 10)
+	_, actualActiveVersion, err := NewRepository(repository.Pool()).Related(ctx, accountID, contentKey("scene-a"), 10)
 	require.NoError(t, err)
 	require.Equal(t, activeVersion, actualActiveVersion)
 }

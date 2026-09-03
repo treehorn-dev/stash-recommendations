@@ -480,7 +480,7 @@ func (repository *Repository) SaveAndActivate(ctx context.Context, projection Pr
 	return versionID, nil
 }
 
-func (repository *Repository) Related(ctx context.Context, source domain.ContentKey, limit int) ([]Recommendation, string, error) {
+func (repository *Repository) Related(ctx context.Context, accountID string, source domain.ContentKey, limit int) ([]Recommendation, string, error) {
 	version, found, err := repository.activeVersion(ctx)
 	if err != nil || !found {
 		return nil, version, err
@@ -489,19 +489,45 @@ func (repository *Repository) Related(ctx context.Context, source domain.Content
 		WITH source AS (
 			SELECT embedding
 			FROM model_scene_vectors
-			WHERE model_version_id = $1 AND endpoint = $2 AND stash_id = $3
+			WHERE model_version_id = $1 AND endpoint = $3 AND stash_id = $4
+		), rated AS (
+			SELECT preferences.rating, vectors.embedding
+			FROM current_preferences AS preferences
+			JOIN model_scene_vectors AS vectors
+				ON vectors.model_version_id = $1
+				AND vectors.endpoint = preferences.endpoint
+				AND vectors.stash_id = preferences.stash_id
+			WHERE preferences.account_id = $2
+		), baseline AS (
+			SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean
+			FROM rated
 		)
 		SELECT candidates.endpoint, candidates.stash_id,
 			1 - (candidates.embedding <=> source.embedding) AS score,
 			'["content_similarity"]'::jsonb AS reasons,
-			NULL::double precision AS predicted_rating
+			CASE
+				WHEN baseline.rating_count < $7 THEN NULL
+				ELSE ($8 * baseline.account_mean + COALESCE(evidence.weighted_ratings, 0))
+					/ ($8 + COALESCE(evidence.weight, 0))
+			END AS predicted_rating
 		FROM model_scene_vectors AS candidates
 		CROSS JOIN source
+		CROSS JOIN baseline
+		LEFT JOIN LATERAL (
+			SELECT SUM(nearest.similarity * nearest.rating) AS weighted_ratings,
+				SUM(nearest.similarity) AS weight
+			FROM (
+				SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> candidates.embedding)) AS similarity
+				FROM rated
+				ORDER BY rated.embedding <=> candidates.embedding
+				LIMIT $6
+			) AS nearest
+		) AS evidence ON true
 		WHERE candidates.model_version_id = $1
-			AND (candidates.endpoint, candidates.stash_id) <> ($2, $3)
+			AND (candidates.endpoint, candidates.stash_id) <> ($3, $4)
 		ORDER BY candidates.embedding <=> source.embedding, candidates.endpoint, candidates.stash_id
-		LIMIT $4
-	`, version, source.Endpoint, source.StashID, normalizeLimit(limit))
+		LIMIT $5
+	`, version, accountID, source.Endpoint, source.StashID, normalizeLimit(limit), maxRatingNeighbors, minimumRatingsForPrediction, ratingPredictionPriorWeight)
 }
 
 func (repository *Repository) ForYou(ctx context.Context, accountID string, limit int) ([]Recommendation, string, error) {
