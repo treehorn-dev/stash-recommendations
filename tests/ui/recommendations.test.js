@@ -204,6 +204,19 @@ test("For You renders local recommendations through the shared ranked collection
   assert.equal(calls.length, 1);
   assert.equal(calls[0].title, "Explore your stash");
   assert.deepEqual(calls[0].ranked, [{ key: "44", score: 0.9 }]);
+  assert.deepEqual(calls[0].pagination, {
+    onPageChange: calls[0].pagination.onPageChange,
+    onPageSizeChange: calls[0].pagination.onPageSizeChange,
+    page: 1,
+    pageSize: 24,
+    pageSizeOptions: [12, 24, 48],
+  });
+  assert.deepEqual(calls[0].sort.options, [
+    { label: "Recommended", value: "score" },
+    { label: "Title: A-Z", value: "title-asc" },
+    { label: "Title: Z-A", value: "title-desc" },
+  ]);
+  assert.equal(calls[0].sort.value, "score");
 });
 
 function registerUi(state, StashPluginComponents) {
