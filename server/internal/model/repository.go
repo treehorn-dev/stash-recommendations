@@ -294,7 +294,7 @@ func (repository *Repository) SaveAndActivateVectors(ctx context.Context, projec
 	if err := insertSceneVectors(ctx, tx, versionID, projection.SceneVectors); err != nil {
 		return "", err
 	}
-	if err := insertAccountProfiles(ctx, tx, versionID, projection.Profiles); err != nil {
+	if err := insertProfileRecommendations(ctx, tx, versionID, projection.Profiles); err != nil {
 		return "", err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE model_versions SET active = false WHERE active`); err != nil {
@@ -310,22 +310,6 @@ func (repository *Repository) SaveAndActivateVectors(ctx context.Context, projec
 		return "", fmt.Errorf("commit vector recommendation projection: %w", err)
 	}
 	return versionID, nil
-}
-
-func insertAccountProfiles(ctx context.Context, tx pgx.Tx, versionID string, profiles []AccountProfile) error {
-	for _, profile := range profiles {
-		reasons, err := json.Marshal(profile.Reasons)
-		if err != nil {
-			return fmt.Errorf("encode account profile reasons: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO model_account_profiles (model_version_id, account_id, embedding, reasons)
-			VALUES ($1, $2, $3::vector, $4)
-		`, versionID, profile.AccountID, vectorLiteral(profile.Embedding), reasons); err != nil {
-			return fmt.Errorf("insert account profile: %w", err)
-		}
-	}
-	return nil
 }
 
 func insertSceneVectors(ctx context.Context, tx pgx.Tx, versionID string, vectors []SceneEmbedding) error {
@@ -344,6 +328,102 @@ func insertSceneVectors(ctx context.Context, tx pgx.Tx, versionID string, vector
 		}
 	}
 	return nil
+}
+
+func insertProfileRecommendations(ctx context.Context, tx pgx.Tx, versionID string, profiles []AccountProfile) error {
+	for _, profile := range profiles {
+		rows, err := tx.Query(ctx, `
+			SELECT endpoint, stash_id, 1 - (embedding <=> $2::vector) AS score
+			FROM model_scene_vectors
+			WHERE model_version_id = $1
+			ORDER BY embedding <=> $2::vector, endpoint, stash_id
+			LIMIT 50
+		`, versionID, vectorLiteral(profile.Embedding))
+		if err != nil {
+			return fmt.Errorf("query profile candidates: %w", err)
+		}
+		var candidates []struct {
+			key   domain.ContentKey
+			score float64
+		}
+		for rows.Next() {
+			var key domain.ContentKey
+			var score float64
+			if err := rows.Scan(&key.Endpoint, &key.StashID, &score); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan profile candidate: %w", err)
+			}
+			candidates = append(candidates, struct {
+				key   domain.ContentKey
+				score float64
+			}{key: key, score: score})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("iterate profile candidates: %w", err)
+		}
+		rows.Close()
+
+		reasons, err := json.Marshal(profile.Reasons)
+		if err != nil {
+			return fmt.Errorf("encode profile reasons: %w", err)
+		}
+		for _, candidate := range candidates {
+			prediction, err := personalRatingForCandidate(ctx, tx, versionID, profile.AccountID, candidate.key)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO user_recommendations (model_version_id, account_id, source_endpoint, source_stash_id, score, reasons, predicted_rating)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`, versionID, profile.AccountID, candidate.key.Endpoint, candidate.key.StashID, candidate.score, reasons, prediction); err != nil {
+				return fmt.Errorf("insert profile recommendation: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// personalRatingForCandidate keeps nearest-neighbor work bounded and stores a
+// normalized score. The public response converts it to Stash's five-point UI.
+func personalRatingForCandidate(ctx context.Context, tx pgx.Tx, versionID, accountID string, candidate domain.ContentKey) (*float64, error) {
+	var prediction *float64
+	err := tx.QueryRow(ctx, `
+		WITH candidate AS (
+			SELECT embedding
+			FROM model_scene_vectors
+			WHERE model_version_id = $1 AND endpoint = $3 AND stash_id = $4
+		), rated AS (
+			SELECT preferences.rating, vectors.embedding
+			FROM current_preferences AS preferences
+			JOIN model_scene_vectors AS vectors
+				ON vectors.model_version_id = $1
+				AND vectors.endpoint = preferences.endpoint
+				AND vectors.stash_id = preferences.stash_id
+			WHERE preferences.account_id = $2
+		), baseline AS (
+			SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean
+			FROM rated
+		), nearest AS (
+			SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> candidate.embedding)) AS similarity
+			FROM rated
+			CROSS JOIN candidate
+			ORDER BY rated.embedding <=> candidate.embedding
+			LIMIT $5
+		)
+		SELECT CASE
+			WHEN baseline.rating_count < $6 THEN NULL
+			ELSE ($7 * baseline.account_mean + COALESCE(SUM(nearest.similarity * nearest.rating), 0))
+				/ ($7 + COALESCE(SUM(nearest.similarity), 0))
+		END
+		FROM baseline
+		LEFT JOIN nearest ON true
+		GROUP BY baseline.rating_count, baseline.account_mean
+	`, versionID, accountID, candidate.Endpoint, candidate.StashID, maxRatingNeighbors, minimumRatingsForPrediction, ratingPredictionPriorWeight).Scan(&prediction)
+	if err != nil {
+		return nil, fmt.Errorf("predict personal rating: %w", err)
+	}
+	return prediction, nil
 }
 
 func (repository *Repository) SaveAndActivate(ctx context.Context, projection Projection) (string, error) {
@@ -400,7 +480,7 @@ func (repository *Repository) SaveAndActivate(ctx context.Context, projection Pr
 	return versionID, nil
 }
 
-func (repository *Repository) Related(ctx context.Context, source domain.ContentKey, limit int) ([]Recommendation, string, error) {
+func (repository *Repository) Related(ctx context.Context, accountID string, source domain.ContentKey, limit int) ([]Recommendation, string, error) {
 	version, found, err := repository.activeVersion(ctx)
 	if err != nil || !found {
 		return nil, version, err
@@ -409,61 +489,60 @@ func (repository *Repository) Related(ctx context.Context, source domain.Content
 		WITH source AS (
 			SELECT embedding
 			FROM model_scene_vectors
-			WHERE model_version_id = $1 AND endpoint = $2 AND stash_id = $3
+			WHERE model_version_id = $1 AND endpoint = $3 AND stash_id = $4
+		), rated AS (
+			SELECT preferences.rating, vectors.embedding
+			FROM current_preferences AS preferences
+			JOIN model_scene_vectors AS vectors
+				ON vectors.model_version_id = $1
+				AND vectors.endpoint = preferences.endpoint
+				AND vectors.stash_id = preferences.stash_id
+			WHERE preferences.account_id = $2
+		), baseline AS (
+			SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean
+			FROM rated
 		)
 		SELECT candidates.endpoint, candidates.stash_id,
 			1 - (candidates.embedding <=> source.embedding) AS score,
 			'["content_similarity"]'::jsonb AS reasons,
-			NULL::double precision AS predicted_rating
+			CASE
+				WHEN baseline.rating_count < $7 THEN NULL
+				ELSE ($8 * baseline.account_mean + COALESCE(evidence.weighted_ratings, 0))
+					/ ($8 + COALESCE(evidence.weight, 0))
+			END AS predicted_rating
 		FROM model_scene_vectors AS candidates
 		CROSS JOIN source
+		CROSS JOIN baseline
+		LEFT JOIN LATERAL (
+			SELECT SUM(nearest.similarity * nearest.rating) AS weighted_ratings,
+				SUM(nearest.similarity) AS weight
+			FROM (
+				SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> candidates.embedding)) AS similarity
+				FROM rated
+				ORDER BY rated.embedding <=> candidates.embedding
+				LIMIT $6
+			) AS nearest
+		) AS evidence ON true
 		WHERE candidates.model_version_id = $1
-			AND (candidates.endpoint, candidates.stash_id) <> ($2, $3)
+			AND (candidates.endpoint, candidates.stash_id) <> ($3, $4)
 		ORDER BY candidates.embedding <=> source.embedding, candidates.endpoint, candidates.stash_id
-		LIMIT $4
-	`, version, source.Endpoint, source.StashID, normalizeLimit(limit))
+		LIMIT $5
+	`, version, accountID, source.Endpoint, source.StashID, normalizeLimit(limit), maxRatingNeighbors, minimumRatingsForPrediction, ratingPredictionPriorWeight)
 }
 
-func (repository *Repository) ForYou(ctx context.Context, accountID string, limit, offset int) ([]Recommendation, string, error) {
+func (repository *Repository) ForYou(ctx context.Context, accountID string, limit int) ([]Recommendation, string, error) {
 	version, found, err := repository.activeVersion(ctx)
 	if err != nil || !found {
 		return nil, version, err
 	}
 	return repository.readRecommendations(ctx, `
-		WITH profile AS (
-			SELECT embedding, reasons
-			FROM model_account_profiles
-			WHERE model_version_id = $1 AND account_id = $2
-		), rated AS (
-			SELECT preferences.rating, vectors.embedding
-			FROM current_preferences AS preferences
-			JOIN model_scene_vectors AS vectors ON vectors.model_version_id = $1
-				AND vectors.endpoint = preferences.endpoint AND vectors.stash_id = preferences.stash_id
-			WHERE preferences.account_id = $2
-		), baseline AS (
-			SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean FROM rated
-		), ranked AS (
-			SELECT candidates.endpoint, candidates.stash_id, candidates.embedding,
-				candidates.embedding <=> profile.embedding AS distance
-			FROM model_scene_vectors AS candidates CROSS JOIN profile
-			WHERE candidates.model_version_id = $1
-			ORDER BY (candidates.embedding <=> profile.embedding) + 0, candidates.endpoint, candidates.stash_id
-			LIMIT $3 OFFSET $4
-		)
-		SELECT ranked.endpoint, ranked.stash_id, 1 - ranked.distance AS score, profile.reasons,
-			CASE WHEN baseline.rating_count < $5 THEN NULL
-			ELSE ($6 * baseline.account_mean + COALESCE(SUM(nearest.similarity * nearest.rating), 0))
-				/ ($6 + COALESCE(SUM(nearest.similarity), 0)) END AS predicted_rating
-		FROM ranked CROSS JOIN profile CROSS JOIN baseline
-		LEFT JOIN LATERAL (
-			SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> ranked.embedding)) AS similarity
-			FROM rated
-			ORDER BY (rated.embedding <=> ranked.embedding) + 0
-			LIMIT $7
-		) AS nearest ON true
-		GROUP BY ranked.endpoint, ranked.stash_id, ranked.distance, profile.reasons, baseline.rating_count, baseline.account_mean
-		ORDER BY ranked.distance, ranked.endpoint, ranked.stash_id
-	`, version, accountID, normalizeLimit(limit), max(offset, 0), minimumRatingsForPrediction, ratingPredictionPriorWeight, maxRatingNeighbors)
+		SELECT source_endpoint, source_stash_id, score, reasons
+			, predicted_rating
+		FROM user_recommendations
+		WHERE model_version_id = $1 AND account_id = $2
+		ORDER BY score DESC, source_endpoint, source_stash_id
+		LIMIT $3
+	`, version, accountID, normalizeLimit(limit))
 }
 
 func (repository *Repository) activeVersion(ctx context.Context) (string, bool, error) {
@@ -509,15 +588,6 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 		return nil, "", fmt.Errorf("iterate recommendations: %w", err)
 	}
 
-	keys := make([]domain.ContentKey, 0, len(raw))
-	for _, row := range raw {
-		keys = append(keys, row.key)
-	}
-	templates, err := repository.canonicalURLs(ctx, keys)
-	if err != nil {
-		return nil, "", err
-	}
-
 	version := fmt.Sprint(arguments[0])
 	items := make([]Recommendation, 0, len(raw))
 	for _, row := range raw {
@@ -525,7 +595,10 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 		if err := json.Unmarshal(row.reasons, &reasons); err != nil {
 			return nil, "", fmt.Errorf("decode recommendation reasons: %w", err)
 		}
-		canonicalURL := canonicalURL(templates[row.key.Endpoint], row.key.StashID)
+		canonicalURL, err := repository.canonicalURL(ctx, row.key)
+		if err != nil {
+			return nil, "", err
+		}
 		if row.predictedRating != nil {
 			fivePoint := *row.predictedRating * 5
 			row.predictedRating = &fivePoint
@@ -535,53 +608,21 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 	return items, version, nil
 }
 
-func (repository *Repository) canonicalURLs(ctx context.Context, keys []domain.ContentKey) (map[string]string, error) {
-	endpoints := make([]string, 0, len(keys))
-	seen := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		if _, exists := seen[key.Endpoint]; exists {
-			continue
-		}
-		seen[key.Endpoint] = struct{}{}
-		endpoints = append(endpoints, key.Endpoint)
-	}
-	if len(endpoints) == 0 {
-		return map[string]string{}, nil
-	}
-
-	rows, err := repository.pool.Query(ctx, `
-		SELECT endpoint, canonical_scene_url_template
-		FROM source_configs
-		WHERE endpoint = ANY($1)
-			AND canonical_scene_url_template IS NOT NULL
-			AND btrim(canonical_scene_url_template) <> ''
-	`, endpoints)
+func (repository *Repository) canonicalURL(ctx context.Context, key domain.ContentKey) (*string, error) {
+	var template *string
+	err := repository.pool.QueryRow(ctx, `SELECT canonical_scene_url_template FROM source_configs WHERE endpoint = $1`, key.Endpoint).Scan(&template)
 	if err != nil {
-		return nil, fmt.Errorf("query canonical URLs: %w", err)
-	}
-	defer rows.Close()
-
-	templates := make(map[string]string, len(endpoints))
-	for rows.Next() {
-		var endpoint, template string
-		if err := rows.Scan(&endpoint, &template); err != nil {
-			return nil, fmt.Errorf("scan canonical URL: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
 		}
-		templates[endpoint] = template
+		return nil, fmt.Errorf("query canonical URL: %w", err)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate canonical URLs: %w", err)
+	if template == nil || strings.TrimSpace(*template) == "" {
+		return nil, nil
 	}
-	return templates, nil
-}
-
-func canonicalURL(template, stashID string) *string {
-	if strings.TrimSpace(template) == "" {
-		return nil
-	}
-	value := strings.ReplaceAll(template, "{stash_id}", stashID)
-	value = strings.ReplaceAll(value, "{id}", stashID)
-	return &value
+	value := strings.ReplaceAll(*template, "{stash_id}", key.StashID)
+	value = strings.ReplaceAll(value, "{id}", key.StashID)
+	return &value, nil
 }
 
 func normalizeLimit(limit int) int {
