@@ -17,6 +17,8 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
+const profileRecommendationLimit = 5000
+
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
@@ -337,8 +339,8 @@ func insertProfileRecommendations(ctx context.Context, tx pgx.Tx, versionID stri
 			FROM model_scene_vectors
 			WHERE model_version_id = $1
 			ORDER BY embedding <=> $2::vector, endpoint, stash_id
-			LIMIT 50
-		`, versionID, vectorLiteral(profile.Embedding))
+			LIMIT $3
+		`, versionID, vectorLiteral(profile.Embedding), profileRecommendationLimit)
 		if err != nil {
 			return fmt.Errorf("query profile candidates: %w", err)
 		}
