@@ -125,6 +125,10 @@
   max-width: min(18rem, calc(100vw - 2rem));
 }
 
+.stash-recommendations__entity-card .stash-composables-entity-card__media-rail {
+  margin-top: -0.5rem;
+}
+
 .stash-recommendations__count-popover-content {
   display: grid;
   gap: 0.25rem;
@@ -161,9 +165,38 @@
   text-align: center;
 }
 
-.stash-recommendations__badge-cell--rating {
-  background: rgba(57, 157, 103, 0.84);
-  color: #fff;
+.stash-recommendations__badge-cell--score {
+  border: 1px solid var(--stash-recommendations-score-color);
+  color: var(--stash-recommendations-score-color);
+}
+
+.stash-recommendations__badge-cell--score.stash-recommendations__badge-cell--local {
+  background: var(--stash-recommendations-score-color);
+  color: var(--bs-body-bg, #111);
+}
+
+.stash-recommendations__badge-cell--score:not(.stash-recommendations__badge-cell--local) {
+  background: transparent;
+}
+
+.stash-recommendations__badge-cell--beige {
+  --stash-recommendations-score-color: #d6c19a;
+}
+
+.stash-recommendations__badge-cell--yellow {
+  --stash-recommendations-score-color: #e3c95d;
+}
+
+.stash-recommendations__badge-cell--gold {
+  --stash-recommendations-score-color: #e7a33f;
+}
+
+.stash-recommendations__badge-cell--orange {
+  --stash-recommendations-score-color: #e77c3d;
+}
+
+.stash-recommendations__badge-cell--red {
+  --stash-recommendations-score-color: #d84a45;
 }
 
 .stash-recommendations__badge-cell--new {
@@ -187,10 +220,52 @@
 }
 
 .stash-recommendations__heatmap {
-  height: 100%;
   object-fit: fill;
   opacity: 0.75;
   width: 100%;
+}
+
+.stash-recommendations__poster-overlays {
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  height: 100%;
+  position: relative;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  width: 100%;
+}
+
+.stash-recommendations__poster-overlay {
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 0.2rem;
+  padding: 0.15rem 0.35rem;
+  position: absolute;
+}
+
+.stash-recommendations__poster-overlay--studio {
+  bottom: 0.35rem;
+  color: inherit;
+  left: 0.35rem;
+  max-width: calc(100% - 5rem);
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stash-recommendations__poster-overlay--studio:hover {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.stash-recommendations__poster-overlay--duration {
+  bottom: 0.35rem;
+  right: 0.35rem;
+}
+
+.stash-recommendations__poster-overlay--speed {
+  right: 0.35rem;
+  top: 0.35rem;
 }
 
 .stash-recommendations__status {

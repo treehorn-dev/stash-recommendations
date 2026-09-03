@@ -30,9 +30,20 @@ test("recommendationBadgeCells prefers a local rating and identifies unwatched s
       scene: { rating100: 90 },
     }),
     [
-      { kind: "rating", label: "Your rating", value: "4.5" },
+      { kind: "score", label: "Your rating", source: "local", tone: "red", value: "4.5" },
       { kind: "new", label: "New" },
     ]
+  );
+});
+
+test("recommendationBadgeCells uses outline semantics for predicted and public scores", () => {
+  assert.deepEqual(
+    recommendationBadgeCells({ item: { predicted_rating: 3.1, watched: true }, kind: "local", scene: {} }),
+    [{ kind: "score", label: "Predicted rating", source: "predicted", tone: "orange", value: "3.1" }]
+  );
+  assert.deepEqual(
+    recommendationBadgeCells({ item: { public_rating: 1.5, watched: true }, kind: "local", scene: {} }),
+    [{ kind: "score", label: "Public average rating", source: "public", tone: "yellow", value: "1.5" }]
   );
 });
 
@@ -46,21 +57,30 @@ test("recommendationBadgeCells labels remote recommendations", () => {
 test("describeLocalScene maps Stash metadata into generic card data", () => {
   const description = describeLocalScene({
     details: "A scene description.",
-    files: [{ video_codec: "h264" }, { video_codec: "hevc" }],
+    files: [{ duration: 3723, video_codec: "h264" }, { video_codec: "hevc" }],
     groups: [{ group: { name: "Collection" } }],
     o_counter: 3,
-    paths: { interactive_heatmap: "/scene/1/heatmap", screenshot: "/scene/1/screenshot" },
+    interactive_speed: 140,
+    paths: { interactive_heatmap: "/scene/1/heatmap", preview: "/scene/1/preview", screenshot: "/scene/1/screenshot" },
     performers: [{ name: "Performer A" }, { name: "Performer B" }],
     play_count: 7,
     tags: [{ name: "Tag A" }, { name: "Tag B" }],
     title: "Scene title",
+    studio: { id: "studio-1", name: "Studio One" },
   });
 
   assert.equal(description.attributes, undefined);
   assert.equal(description.countRail.find((entry) => entry.key === "performers").count, 2);
   assert.equal(description.countRail.find((entry) => entry.key === "media-video").label, "2 video files");
   assert.equal(description.description, "A scene description.");
-  assert.deepEqual(description.thumbnail, { heatmap: "/scene/1/heatmap", screenshot: "/scene/1/screenshot" });
+  assert.deepEqual(description.thumbnail, {
+    heatmap: "/scene/1/heatmap",
+    preview: "/scene/1/preview",
+    screenshot: "/scene/1/screenshot",
+  });
+  assert.equal(description.duration, "1:02:03");
+  assert.equal(description.interactiveSpeed, 140);
+  assert.deepEqual(description.studio, { id: "studio-1", name: "Studio One" });
   assert.equal(description.title, "Scene title");
 });
 
@@ -368,15 +388,17 @@ test("For You maps local scenes into the generic entity card surface", () => {
           kind: "local",
           item: { watched: false },
           scene: {
-            files: [{ video_codec: "h264" }],
+            files: [{ duration: 3723, video_codec: "h264" }],
             id: "44",
+            interactive_speed: 140,
             o_counter: 2,
-            paths: { interactive_heatmap: "/scene/44/heatmap", screenshot: "/scene/44/screenshot" },
+            paths: { interactive_heatmap: "/scene/44/heatmap", preview: "/scene/44/preview", screenshot: "/scene/44/screenshot" },
             performers: [{ name: "Performer" }],
             play_count: 3,
             rating100: 90,
             tags: [{ name: "Tag" }],
             title: "Local Scene",
+            studio: { id: "studio-1", name: "Studio One" },
           },
           reasons: ["play_profile"],
           score: 0.9,
@@ -408,7 +430,10 @@ test("For You maps local scenes into the generic entity card surface", () => {
   assert.equal(cards[0].showZeroCounts, false);
   assert.equal(cards[0].countRail.find((entry) => entry.key === "performers").count, "1");
   assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").count, "2");
-  assert.equal(cards[0].thumbnail.overlay.props.src, "/scene/44/heatmap");
+  assert.equal(cards[0].thumbnail.href, "/scenes/44");
+  assert.equal(cards[0].thumbnail.previewSrc, "/scene/44/preview");
+  assert.equal(cards[0].mediaRail.props.src, "/scene/44/heatmap");
+  assert.equal(cards[0].thumbnail.overlay.props.className, "stash-recommendations__poster-overlays");
   assert.equal(cards[0].header, undefined);
   assert.deepEqual(
     cards[0].badgeRail.props.children.map((cell) => ({
@@ -418,7 +443,7 @@ test("For You maps local scenes into the generic entity card surface", () => {
     })),
     [
       {
-        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--rating",
+        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--score stash-recommendations__badge-cell--local stash-recommendations__badge-cell--red",
         title: "Your rating",
         value: "4.5",
       },

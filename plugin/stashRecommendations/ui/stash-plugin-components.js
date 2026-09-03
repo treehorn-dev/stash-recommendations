@@ -379,17 +379,47 @@ function renderEntityCard(runtime, props = {}) {
       )
     : null;
   const media = thumbnail?.src
-    ? React.createElement(
-        "div",
-        { className: "stash-composables-entity-card__media" },
-        React.createElement("img", {
+    ? (() => {
+        const poster = React.createElement("img", {
           alt: thumbnail.alt ?? "",
           className: "stash-composables-entity-card__thumbnail",
           loading: "lazy",
           src: thumbnail.src,
-        }),
-        thumbnail.overlay
-      )
+        });
+        const preview = thumbnail.previewSrc
+          ? React.createElement("video", {
+              "aria-hidden": true,
+              autoPlay: true,
+              className: "stash-composables-entity-card__preview",
+              loop: true,
+              muted: true,
+              playsInline: true,
+              preload: "metadata",
+              src: thumbnail.previewSrc,
+            })
+          : null;
+        const visual = thumbnail.href
+          ? React.createElement(
+              "a",
+              { className: "stash-composables-entity-card__media-link", href: thumbnail.href },
+              poster,
+              preview
+            )
+          : preview
+            ? React.createElement("div", { className: "stash-composables-entity-card__media-visual" }, poster, preview)
+            : poster;
+        return React.createElement(
+          "div",
+          { className: "stash-composables-entity-card__media" },
+          visual,
+          thumbnail.overlay
+            ? React.createElement("div", { className: "stash-composables-entity-card__media-overlay" }, thumbnail.overlay)
+            : null
+        );
+      })()
+    : null;
+  const mediaRail = props.mediaRail
+    ? React.createElement("div", { className: "stash-composables-entity-card__media-rail" }, props.mediaRail)
     : null;
   const body = React.createElement(
     "div",
@@ -454,7 +484,7 @@ function renderEntityCard(runtime, props = {}) {
       )
     : null;
 
-  return React.createElement("article", rootProps, ...[badgeRail, header, media, body, countRail, footer].filter(Boolean));
+  return React.createElement("article", rootProps, ...[badgeRail, header, media, mediaRail, body, countRail, footer].filter(Boolean));
 }
 
 

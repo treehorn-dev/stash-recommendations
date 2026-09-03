@@ -75,15 +75,34 @@
       return [{ kind: "remote", label: "Remote" }];
     }
 
+    function scoreTone(score) {
+      if (score <= 1) return "beige";
+      if (score <= 2) return "yellow";
+      if (score <= 3) return "gold";
+      if (score <= 4) return "orange";
+      return "red";
+    }
+
+    function scoreCell(label, source, score) {
+      const normalized = Math.max(0.5, Math.min(5, Number(score)));
+      const rounded = Math.round(normalized * 10) / 10;
+      return {
+        kind: "score",
+        label,
+        source,
+        tone: scoreTone(rounded),
+        value: Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1),
+      };
+    }
+
     const cells = [];
     const rating100 = Number(entry.scene?.rating100);
     if (Number.isFinite(rating100) && rating100 > 0) {
-      const rating = Math.round((rating100 / 20) * 10) / 10;
-      cells.push({
-        kind: "rating",
-        label: "Your rating",
-        value: Number.isInteger(rating) ? String(rating) : rating.toFixed(1),
-      });
+      cells.push(scoreCell("Your rating", "local", rating100 / 20));
+    } else if (Number.isFinite(Number(entry.item?.predicted_rating))) {
+      cells.push(scoreCell("Predicted rating", "predicted", entry.item.predicted_rating));
+    } else if (Number.isFinite(Number(entry.item?.public_rating))) {
+      cells.push(scoreCell("Public average rating", "public", entry.item.public_rating));
     }
     if (entry.item?.watched !== true && !localSceneWasWatched(entry.scene)) {
       cells.push({ kind: "new", label: "New" });
@@ -110,6 +129,20 @@
 
   function countLabel(count, singular, plural = `${singular}s`) {
     return `${count} ${count === 1 ? singular : plural}`;
+  }
+
+  function formatDuration(seconds) {
+    const totalSeconds = Math.floor(Number(seconds));
+    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+      return "";
+    }
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const remainder = totalSeconds % 60;
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+    }
+    return `${minutes}:${String(remainder).padStart(2, "0")}`;
   }
 
   function sceneCountRailEntries(scene = {}) {
@@ -150,11 +183,19 @@
   }
 
   function describeLocalScene(scene = {}) {
+    const primaryFile = (Array.isArray(scene.files) ? scene.files : []).find((file) => Number(file?.duration) > 0);
+    const studio = scene.studio?.name
+      ? { id: String(scene.studio.id || ""), name: String(scene.studio.name) }
+      : null;
     return {
       countRail: sceneCountRailEntries(scene),
       description: String(scene.details || ""),
+      duration: formatDuration(primaryFile?.duration),
+      interactiveSpeed: Number.isFinite(Number(scene.interactive_speed)) ? Number(scene.interactive_speed) : null,
+      studio,
       thumbnail: {
         heatmap: scene.paths?.interactive_heatmap || "",
+        preview: scene.paths?.preview || "",
         screenshot: scene.paths?.screenshot || "",
       },
       title: String(scene.title || "[Untitled Scene]"),
@@ -217,16 +258,19 @@
             play_count
             o_counter
             interactive
+            interactive_speed
             play_history
             o_history
             paths {
               screenshot
+              preview
               interactive_heatmap
             }
             files {
               audio_codec
               basename
               id
+              duration
               video_codec
             }
             performers {
@@ -242,6 +286,10 @@
                 id
                 name
               }
+            }
+            studio {
+              id
+              name
             }
             stash_ids {
               endpoint
@@ -377,7 +425,12 @@
               ...badgeCells.map((cell) => React.createElement(
                 "span",
                 {
-                  className: `stash-recommendations__badge-cell stash-recommendations__badge-cell--${cell.kind}`,
+                  className: [
+                    "stash-recommendations__badge-cell",
+                    `stash-recommendations__badge-cell--${cell.kind}`,
+                    cell.source ? `stash-recommendations__badge-cell--${cell.source}` : "",
+                    cell.tone ? `stash-recommendations__badge-cell--${cell.tone}` : "",
+                  ].filter(Boolean).join(" "),
                   key: cell.kind,
                   title: cell.label,
                 },
@@ -395,6 +448,34 @@
                 src: card.thumbnail.heatmap,
               })
             : null;
+          const posterOverlay = React.createElement(
+            "div",
+            { className: "stash-recommendations__poster-overlays" },
+            card.studio
+              ? React.createElement(
+                  "a",
+                  {
+                    className: "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--studio",
+                    href: `/studios/${card.studio.id}`,
+                  },
+                  card.studio.name
+                )
+              : null,
+            card.duration
+              ? React.createElement(
+                  "span",
+                  { className: "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--duration" },
+                  card.duration
+                )
+              : null,
+            card.interactiveSpeed
+              ? React.createElement(
+                  "span",
+                  { className: "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--speed" },
+                  `${card.interactiveSpeed} BPM`
+                )
+              : null
+          );
           return SharedComponents.renderEntityCard(
             { React },
             {
@@ -405,10 +486,17 @@
               footer: props.entry.reasons.length
                 ? React.createElement("span", null, props.entry.reasons.join(", "))
                 : null,
+              mediaRail: heatmap,
               style: watched ? undefined : { borderColor: "var(--bs-warning, #d39e00)" },
               showZeroCounts: false,
               thumbnail: card.thumbnail.screenshot
-                ? { alt: "", overlay: heatmap, src: card.thumbnail.screenshot }
+                ? {
+                    alt: "",
+                    href: `/scenes/${props.entry.scene.id}`,
+                    overlay: posterOverlay,
+                    previewSrc: card.thumbnail.preview,
+                    src: card.thumbnail.screenshot,
+                  }
                 : null,
               title: React.createElement(
                 "a",
