@@ -148,28 +148,31 @@ def queue_metadata_sync(
     jobs = MetadataJobs(outbox.path)
     for key in keys:
         jobs.enqueue(key.endpoint, key.stash_id)
-    claimed = jobs.claim(batch_size)
+    claim_size = batch_size or 100
+    attempt_run = str(uuid4())
     queued = 0
     processed = 0
     errors: list[dict[str, Any]] = []
-    for endpoint, stash_id in claimed:
-        processed += 1
-        try:
-            scene = source.fetch_scene(endpoint, stash_id)
-            if scene is None:
+    while claimed := jobs.claim(claim_size, attempt_run=attempt_run):
+        for endpoint, stash_id in claimed:
+            processed += 1
+            try:
+                scene = source.fetch_scene(endpoint, stash_id)
+                if scene is None:
+                    jobs.complete(endpoint, stash_id)
+                    continue
+                outbox.enqueue(to_source_snapshot(endpoint, _utcnow(), scene))
                 jobs.complete(endpoint, stash_id)
-                continue
-            outbox.enqueue(to_source_snapshot(endpoint, _utcnow(), scene))
-            jobs.complete(endpoint, stash_id)
-            queued += 1
-        except Exception as error:
-            jobs.fail(endpoint, stash_id)
-            errors.append(
-                {
-                    "content_key": {"endpoint": endpoint, "stash_id": stash_id},
-                    "error": str(error),
-                }
-            )
+                queued += 1
+            except Exception as error:
+                message = str(error)
+                jobs.fail(endpoint, stash_id, message)
+                errors.append(
+                    {
+                        "content_key": {"endpoint": endpoint, "stash_id": stash_id},
+                        "error": message,
+                    }
+                )
     result: dict[str, Any] = {
         "queued": queued,
         "processed": processed,
@@ -178,7 +181,8 @@ def queue_metadata_sync(
     }
     if errors:
         result["failed"] = len(errors)
-        result["errors"] = errors
+        result["errors"] = errors[:20]
+        result["diagnostics"] = jobs.diagnostics()
     return result
 
 

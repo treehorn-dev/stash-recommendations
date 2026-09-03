@@ -241,6 +241,10 @@ def test_status_clears_paused_auth_when_settings_change(tmp_path: Path, monkeypa
         "active": False,
         "reason": None,
     }
+    assert output["output"]["metadata"] == {
+        "jobs": {"pending": 0, "in_progress": 0, "completed": 0, "failed": 0},
+        "diagnostics": [],
+    }
 
 
 def seeded_outbox(tmp_path: Path) -> Outbox:
