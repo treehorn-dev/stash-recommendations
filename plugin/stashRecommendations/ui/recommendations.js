@@ -70,6 +70,27 @@
       || (Array.isArray(scene?.o_history) && scene.o_history.length > 0);
   }
 
+  function recommendationBadgeCells(entry = {}) {
+    if (entry.kind === "remote") {
+      return [{ kind: "remote", label: "Remote" }];
+    }
+
+    const cells = [];
+    const rating100 = Number(entry.scene?.rating100);
+    if (Number.isFinite(rating100) && rating100 > 0) {
+      const rating = Math.round((rating100 / 20) * 10) / 10;
+      cells.push({
+        kind: "rating",
+        label: "Your rating",
+        value: Number.isInteger(rating) ? String(rating) : rating.toFixed(1),
+      });
+    }
+    if (entry.item?.watched !== true && !localSceneWasWatched(entry.scene)) {
+      cells.push({ kind: "new", label: "New" });
+    }
+    return cells;
+  }
+
   function normalizeRecommendationResponse(output) {
     if (!output || typeof output !== "object") {
       return { model_version: "", items: [] };
@@ -153,6 +174,7 @@
             id
             title
             details
+            rating100
             play_count
             o_counter
             play_history
@@ -262,6 +284,22 @@
 
     function RecommendationCard(props) {
       if (SharedComponents?.renderEntityCard) {
+        const badgeCells = recommendationBadgeCells(props.entry);
+        const badgeRail = badgeCells.length
+          ? React.createElement(
+              "div",
+              { className: "stash-recommendations__badge-cells" },
+              ...badgeCells.map((cell) => React.createElement(
+                "span",
+                {
+                  className: `stash-recommendations__badge-cell stash-recommendations__badge-cell--${cell.kind}`,
+                  key: cell.kind,
+                  title: cell.label,
+                },
+                cell.value || cell.label
+              ))
+            )
+          : null;
         if (props.entry.kind === "local") {
           const watched = props.entry.item?.watched === true || localSceneWasWatched(props.entry.scene);
           const card = describeLocalScene(props.entry.scene);
@@ -276,14 +314,12 @@
             { React },
             {
               attributes: card.attributes,
+              badgeRail,
               className: "stash-recommendations__entity-card",
               description: card.description,
               footer: props.entry.reasons.length
                 ? React.createElement("span", null, props.entry.reasons.join(", "))
                 : null,
-              header: watched
-                ? null
-                : React.createElement("span", { className: "stash-recommendations__status stash-recommendations__status--unwatched" }, "Unwatched"),
               style: watched ? undefined : { borderColor: "var(--bs-warning, #d39e00)" },
               thumbnail: card.thumbnail.screenshot
                 ? { alt: "", overlay: heatmap, src: card.thumbnail.screenshot }
@@ -299,11 +335,11 @@
         return SharedComponents.renderEntityCard(
           { React },
           {
+            badgeRail,
             className: "stash-recommendations__entity-card stash-recommendations__entity-card--remote",
             footer: props.entry.reasons.length
               ? React.createElement("span", null, props.entry.reasons.join(", "))
               : null,
-            header: React.createElement("span", { className: "stash-recommendations__status stash-recommendations__status--remote" }, "Not in your stash"),
             style: {
               backgroundColor: "rgba(255, 255, 255, 0.02)",
               borderColor: "rgba(255, 255, 255, 0.22)",
@@ -741,6 +777,7 @@
     fetchForYou,
     fetchRelated,
     partitionRecommendations,
+    recommendationBadgeCells,
     register,
     resolveLocalRecommendations,
   };

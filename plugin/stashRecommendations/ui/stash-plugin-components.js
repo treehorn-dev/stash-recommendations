@@ -356,12 +356,23 @@ function renderEntityCard(runtime, props = {}) {
   const attributes = Array.isArray(props.attributes) ? props.attributes.filter(Boolean) : [];
   const thumbnail = props.thumbnail;
   const rootProps = {
-    className: ["stash-composables-entity-card", props.className].filter(Boolean).join(" "),
+    className: [
+      "stash-composables-entity-card",
+      props.badgeRail ? "stash-composables-entity-card--with-badge-rail" : "",
+      props.className,
+    ].filter(Boolean).join(" "),
     ...(Object.keys(styleVariables(props.style)).length ? { style: styleVariables(props.style) } : {}),
   };
 
   const header = props.header
     ? React.createElement("div", { className: "stash-composables-entity-card__header" }, props.header)
+    : null;
+  const badgeRail = props.badgeRail
+    ? React.createElement(
+        "div",
+        { className: "stash-composables-entity-card__badge-rail" },
+        props.badgeRail
+      )
     : null;
   const media = thumbnail?.src
     ? React.createElement(
@@ -413,7 +424,7 @@ function renderEntityCard(runtime, props = {}) {
       )
     : null;
 
-  return React.createElement("article", rootProps, ...[header, media, body, footer].filter(Boolean));
+  return React.createElement("article", rootProps, ...[badgeRail, header, media, body, footer].filter(Boolean));
 }
 
 

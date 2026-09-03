@@ -14,11 +14,33 @@ const modulePath = path.resolve(
 
 const {
   describeLocalScene,
+  recommendationBadgeCells,
   fetchForYou,
   fetchRelated,
   partitionRecommendations,
   resolveLocalRecommendations,
 } = require(modulePath);
+
+test("recommendationBadgeCells prefers a local rating and identifies unwatched scenes as new", () => {
+  assert.deepEqual(
+    recommendationBadgeCells({
+      kind: "local",
+      item: { watched: false },
+      scene: { rating100: 90 },
+    }),
+    [
+      { kind: "rating", label: "Your rating", value: "4.5" },
+      { kind: "new", label: "New" },
+    ]
+  );
+});
+
+test("recommendationBadgeCells labels remote recommendations", () => {
+  assert.deepEqual(
+    recommendationBadgeCells({ kind: "remote", item: {}, url: "https://box.example/scenes/1" }),
+    [{ kind: "remote", label: "Remote" }]
+  );
+});
 
 test("describeLocalScene maps Stash metadata into generic card data", () => {
   const description = describeLocalScene({
@@ -264,6 +286,7 @@ test("For You maps local scenes into the generic entity card surface", () => {
             paths: { interactive_heatmap: "/scene/44/heatmap", screenshot: "/scene/44/screenshot" },
             performers: [{ name: "Performer" }],
             play_count: 3,
+            rating100: 90,
             tags: [{ name: "Tag" }],
             title: "Local Scene",
           },
@@ -296,7 +319,26 @@ test("For You maps local scenes into the generic entity card surface", () => {
   assert.equal(cards[0].attributes.find((attribute) => attribute.key === "performers").content, "Performer");
   assert.equal(cards[0].attributes.find((attribute) => attribute.key === "o-count").content, "2");
   assert.equal(cards[0].thumbnail.overlay.props.src, "/scene/44/heatmap");
-  assert.equal(cards[0].header.props.children, "Unwatched");
+  assert.equal(cards[0].header, undefined);
+  assert.deepEqual(
+    cards[0].badgeRail.props.children.map((cell) => ({
+      className: cell.props.className,
+      title: cell.props.title,
+      value: cell.props.children,
+    })),
+    [
+      {
+        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--rating",
+        title: "Your rating",
+        value: "4.5",
+      },
+      {
+        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--new",
+        title: "New",
+        value: "New",
+      },
+    ]
+  );
 });
 
 function registerUi(state, StashPluginComponents) {
