@@ -413,7 +413,8 @@ func (repository *Repository) Related(ctx context.Context, source domain.Content
 		)
 		SELECT candidates.endpoint, candidates.stash_id,
 			1 - (candidates.embedding <=> source.embedding) AS score,
-			'["content_similarity"]'::jsonb AS reasons
+			'["content_similarity"]'::jsonb AS reasons,
+			NULL::double precision AS predicted_rating
 		FROM model_scene_vectors AS candidates
 		CROSS JOIN source
 		WHERE candidates.model_version_id = $1
@@ -429,17 +430,40 @@ func (repository *Repository) ForYou(ctx context.Context, accountID string, limi
 		return nil, version, err
 	}
 	return repository.readRecommendations(ctx, `
-		SELECT candidates.endpoint, candidates.stash_id,
-			1 - (candidates.embedding <=> profile.embedding) AS score,
-			profile.reasons
-		FROM model_account_profiles AS profile
-		JOIN model_scene_vectors AS candidates
-			ON candidates.model_version_id = profile.model_version_id
-		WHERE profile.model_version_id = $1 AND profile.account_id = $2
-		ORDER BY candidates.embedding <=> profile.embedding, candidates.endpoint, candidates.stash_id
-		LIMIT $3
-		OFFSET $4
-	`, version, accountID, normalizeLimit(limit), max(offset, 0))
+		WITH profile AS (
+			SELECT embedding, reasons
+			FROM model_account_profiles
+			WHERE model_version_id = $1 AND account_id = $2
+		), rated AS (
+			SELECT preferences.rating, vectors.embedding
+			FROM current_preferences AS preferences
+			JOIN model_scene_vectors AS vectors ON vectors.model_version_id = $1
+				AND vectors.endpoint = preferences.endpoint AND vectors.stash_id = preferences.stash_id
+			WHERE preferences.account_id = $2
+		), baseline AS (
+			SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean FROM rated
+		), ranked AS (
+			SELECT candidates.endpoint, candidates.stash_id, candidates.embedding,
+				candidates.embedding <=> profile.embedding AS distance
+			FROM model_scene_vectors AS candidates CROSS JOIN profile
+			WHERE candidates.model_version_id = $1
+			ORDER BY (candidates.embedding <=> profile.embedding) + 0, candidates.endpoint, candidates.stash_id
+			LIMIT $3 OFFSET $4
+		)
+		SELECT ranked.endpoint, ranked.stash_id, 1 - ranked.distance AS score, profile.reasons,
+			CASE WHEN baseline.rating_count < $5 THEN NULL
+			ELSE ($6 * baseline.account_mean + COALESCE(SUM(nearest.similarity * nearest.rating), 0))
+				/ ($6 + COALESCE(SUM(nearest.similarity), 0)) END AS predicted_rating
+		FROM ranked CROSS JOIN profile CROSS JOIN baseline
+		LEFT JOIN LATERAL (
+			SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> ranked.embedding)) AS similarity
+			FROM rated
+			ORDER BY (rated.embedding <=> ranked.embedding) + 0
+			LIMIT $7
+		) AS nearest ON true
+		GROUP BY ranked.endpoint, ranked.stash_id, ranked.distance, profile.reasons, baseline.rating_count, baseline.account_mean
+		ORDER BY ranked.distance, ranked.endpoint, ranked.stash_id
+	`, version, accountID, normalizeLimit(limit), max(offset, 0), minimumRatingsForPrediction, ratingPredictionPriorWeight, maxRatingNeighbors)
 }
 
 func (repository *Repository) activeVersion(ctx context.Context) (string, bool, error) {
@@ -464,17 +488,19 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 	// The selected content key is the first two columns. Canonical URLs are
 	// fetched separately so absent catalog metadata remains a valid result.
 	var raw []struct {
-		key     domain.ContentKey
-		score   float64
-		reasons []byte
+		key             domain.ContentKey
+		score           float64
+		reasons         []byte
+		predictedRating *float64
 	}
 	for rows.Next() {
 		var row struct {
-			key     domain.ContentKey
-			score   float64
-			reasons []byte
+			key             domain.ContentKey
+			score           float64
+			reasons         []byte
+			predictedRating *float64
 		}
-		if err := rows.Scan(&row.key.Endpoint, &row.key.StashID, &row.score, &row.reasons); err != nil {
+		if err := rows.Scan(&row.key.Endpoint, &row.key.StashID, &row.score, &row.reasons, &row.predictedRating); err != nil {
 			return nil, "", fmt.Errorf("scan recommendation: %w", err)
 		}
 		raw = append(raw, row)
@@ -494,7 +520,11 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 		if err != nil {
 			return nil, "", err
 		}
-		items = append(items, Recommendation{ContentKey: row.key, Score: row.score, Reasons: reasons, ModelVersion: version, CanonicalURL: canonicalURL})
+		if row.predictedRating != nil {
+			fivePoint := *row.predictedRating * 5
+			row.predictedRating = &fivePoint
+		}
+		items = append(items, Recommendation{ContentKey: row.key, Score: row.score, Reasons: reasons, ModelVersion: version, CanonicalURL: canonicalURL, PredictedRating: row.predictedRating})
 	}
 	return items, version, nil
 }
