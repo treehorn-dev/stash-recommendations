@@ -65,10 +65,23 @@ def test_service_client_raises_oserror_when_urlopen_times_out(monkeypatch: pytes
         client.deliver_snapshot({"schema_version": 1})
 
 
+def test_service_client_accepts_whitespace_only_success_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "rec_plugin.service_client.request.urlopen",
+        lambda http_request, timeout: FakeHTTPResponse(202, b"\n"),
+    )
+    client = ServiceClient(Settings(service_url="https://stashrec.example", api_key="secret-api-key", show_remote_results=False))
+
+    response = client.deliver_snapshot({"schema_version": 1})
+
+    assert response.status_code == 202
+    assert response.body is None
+
+
 class FakeHTTPResponse:
-    def __init__(self, status: int, body: dict[str, object], headers: dict[str, str] | None = None) -> None:
+    def __init__(self, status: int, body: dict[str, object] | bytes, headers: dict[str, str] | None = None) -> None:
         self.status = status
-        self._payload = json.dumps(body).encode("utf-8")
+        self._payload = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
         self.headers = headers or {}
 
     def __enter__(self) -> "FakeHTTPResponse":
