@@ -20,10 +20,57 @@ const {
   fetchForYou,
   fetchRelated,
   forYouOffsetForPage,
+  indexLocalSceneMatches,
+  localSceneLookupBatches,
   partitionRecommendations,
   resolveLocalRecommendations,
   shouldFetchAnotherForYouBatch,
 } = require(modulePath);
+
+test("local scene lookup batches by endpoint and preserves content-key matches", () => {
+  const items = [
+    { content_key: { endpoint: "https://one.example/graphql", stash_id: "scene-1" } },
+    { content_key: { endpoint: "https://one.example/graphql", stash_id: "scene-2" } },
+    { content_key: { endpoint: "https://two.example/graphql", stash_id: "scene-1" } },
+    { content_key: { endpoint: "https://one.example/graphql", stash_id: "scene-1" } },
+    { content_key: { endpoint: "", stash_id: "ignored" } },
+  ];
+
+  assert.deepEqual(localSceneLookupBatches(items, 1), [
+    { endpoint: "https://one.example/graphql", stash_ids: ["scene-1"] },
+    { endpoint: "https://one.example/graphql", stash_ids: ["scene-2"] },
+    { endpoint: "https://two.example/graphql", stash_ids: ["scene-1"] },
+  ]);
+
+  const matches = indexLocalSceneMatches(items, [
+    {
+      id: "local-one",
+      stash_ids: [
+        { endpoint: "https://one.example/graphql", stash_id: "scene-1" },
+        { endpoint: "https://two.example/graphql", stash_id: "scene-1" },
+      ],
+    },
+    {
+      id: "local-two",
+      stash_ids: [{ endpoint: "https://one.example/graphql", stash_id: "scene-2" }],
+    },
+  ]);
+
+  assert.deepEqual(matches, {
+    "https://one.example/graphql::scene-1": [{ id: "local-one", stash_ids: [
+      { endpoint: "https://one.example/graphql", stash_id: "scene-1" },
+      { endpoint: "https://two.example/graphql", stash_id: "scene-1" },
+    ] }],
+    "https://one.example/graphql::scene-2": [{
+      id: "local-two",
+      stash_ids: [{ endpoint: "https://one.example/graphql", stash_id: "scene-2" }],
+    }],
+    "https://two.example/graphql::scene-1": [{ id: "local-one", stash_ids: [
+      { endpoint: "https://one.example/graphql", stash_id: "scene-1" },
+      { endpoint: "https://two.example/graphql", stash_id: "scene-1" },
+    ] }],
+  });
+});
 
 test("formatRecommendationReasons turns model reason codes into one user-facing explanation", () => {
   assert.equal(
