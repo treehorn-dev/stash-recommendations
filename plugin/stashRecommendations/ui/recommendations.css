@@ -27,7 +27,14 @@
 .stash-recommendations__grid {
   display: grid;
   gap: 0.75rem;
-  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(270px, 320px));
+  justify-content: start;
+}
+
+@media (max-width: 576px) {
+  .stash-recommendations__grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .stash-recommendations__card {
