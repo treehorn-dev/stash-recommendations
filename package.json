@@ -2,6 +2,6 @@
   "name": "stash-recommendations",
   "private": true,
   "scripts": {
-    "test:ui": "node --test tests/ui"
+    "test:ui": "node --test tests/ui/*.test.js"
   }
 }
