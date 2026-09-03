@@ -406,6 +406,7 @@
                 ? React.createElement("span", null, props.entry.reasons.join(", "))
                 : null,
               style: watched ? undefined : { borderColor: "var(--bs-warning, #d39e00)" },
+              showZeroCounts: false,
               thumbnail: card.thumbnail.screenshot
                 ? { alt: "", overlay: heatmap, src: card.thumbnail.screenshot }
                 : null,

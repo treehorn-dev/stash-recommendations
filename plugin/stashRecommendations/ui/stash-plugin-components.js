@@ -354,7 +354,9 @@ function renderEntityCard(runtime, props = {}) {
   }
 
   const attributes = Array.isArray(props.attributes) ? props.attributes.filter(Boolean) : [];
-  const countRailItems = Array.isArray(props.countRail) ? props.countRail.filter(Boolean) : [];
+  const countRailItems = (Array.isArray(props.countRail) ? props.countRail : [])
+    .filter(Boolean)
+    .filter((item) => props.showZeroCounts !== false || Number(item.count) !== 0);
   const thumbnail = props.thumbnail;
   const rootProps = {
     className: [
