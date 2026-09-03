@@ -168,7 +168,45 @@ test("plugin UI registers route, nav, scene tab, and never renders a seeded API 
   assert.doesNotMatch(markup, /seeded-secret-api-key/);
 });
 
-function registerUi(state) {
+test("For You renders local recommendations through the shared ranked collection surface", () => {
+  const calls = [];
+  const { routes } = registerUi(
+    {
+      error: "",
+      items: [
+        {
+          kind: "local",
+          item: { watched: false },
+          scene: { id: "44", title: "Local Scene", paths: { screenshot: "/scene/44/screenshot" } },
+          reasons: ["play_profile"],
+          score: 0.9,
+        },
+      ],
+      loading: false,
+      modelVersion: "model-1",
+      status: {
+        configured: true,
+        settings: { api_key_configured: true, show_remote_results: false },
+        outbox: { pending: {}, delivered: {}, paused: { active: false, reason: null } },
+      },
+    },
+    {
+      renderRankedCollectionSurface(runtime, props) {
+        calls.push(props);
+        return runtime.React.createElement("ranked-collection", { title: props.title });
+      },
+    }
+  );
+
+  const route = routes.find((entry) => entry.path === "/plugins/stash-recommendations");
+  route.component({});
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].title, "Explore your stash");
+  assert.deepEqual(calls[0].ranked, [{ key: "44", score: 0.9 }]);
+});
+
+function registerUi(state, StashPluginComponents) {
   const routes = [];
   const patches = [];
   const React = createReactHarness(state);
@@ -211,7 +249,10 @@ function registerUi(state) {
     },
   };
 
-  require(modulePath).register(PluginApi, { location: { pathname: "/scenes/44", hash: "" } });
+  require(modulePath).register(PluginApi, {
+    location: { pathname: "/scenes/44", hash: "" },
+    StashPluginComponents,
+  });
 
   return { routes, patches };
 }
