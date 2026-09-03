@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import re
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
 
@@ -86,8 +87,9 @@ def _scene_dates(scene: Mapping[str, Any]) -> list[str]:
     dates: list[str] = []
     for field in ("release_date", "production_date", "date"):
         value = scene.get(field)
-        if isinstance(value, str) and _is_valid_date(value) and value not in dates:
-            dates.append(value)
+        normalized = _normalize_date(value)
+        if normalized is not None and normalized not in dates:
+            dates.append(normalized)
     return dates
 
 
@@ -187,12 +189,18 @@ def _parse_timestamp(value: object) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def _is_valid_date(value: str) -> bool:
+def _normalize_date(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if re.fullmatch(r"\d{4}", value):
+        value = f"{value}-01-01"
+    elif re.fullmatch(r"\d{4}-\d{2}", value):
+        value = f"{value}-01"
     try:
         date.fromisoformat(value)
     except ValueError:
-        return False
-    return True
+        return None
+    return value
 
 
 def _is_public_https_url(value: str) -> bool:
