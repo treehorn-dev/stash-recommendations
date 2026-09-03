@@ -26,7 +26,8 @@ docker compose up -d postgres
 The compose service uses `pgvector/pgvector:pg16`. Existing deployments on a
 plain PostgreSQL image must be moved to that image before applying migration
 `009_pgvector_recommendations`; take a database backup before replacing the
-container.
+container. Migration `010_predicted_ratings` adds nullable personal rating
+predictions to active For You projections.
 
 Use this DSN for local work:
 
@@ -141,7 +142,11 @@ new model version, logs the version, and exits.
 `MODEL_O_WEIGHT` defaults to `1.5` and may be overridden with a positive
 number. A build stores one 256-dimensional hashed vector per source scene and
 uses bounded pgvector cosine retrieval for related scenes and account profiles;
-it does not materialize pairwise scene recommendations.
+it does not materialize pairwise scene recommendations. For accounts with at
+least five current explicit ratings that have model vectors, responses also
+include `predicted_rating` on the same 0-5 scale used by Stash. It is a
+similar-rated-scene estimate shrunk toward that account's mean rating; it is
+omitted for cold-start accounts and is not a public/community rating.
 
 ## Configure the Plugin
 
