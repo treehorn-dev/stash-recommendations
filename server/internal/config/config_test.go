@@ -20,3 +20,10 @@ func TestLoadDefaultsAndValidatesModelOWeight(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadEnablesOneShotModelRebuild(t *testing.T) {
+	t.Setenv("REBUILD_MODEL_ONCE", "true")
+	config, err := Load()
+	require.NoError(t, err)
+	require.True(t, config.RebuildModelOnce)
+}
