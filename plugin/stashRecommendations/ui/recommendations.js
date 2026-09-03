@@ -241,6 +241,9 @@
       const outbox = props.status?.outbox ?? {};
       const pending = outbox.pending ?? {};
       const delivered = outbox.delivered ?? {};
+      const metadata = props.status?.metadata ?? {};
+      const metadataJobs = metadata.jobs ?? {};
+      const diagnostic = Array.isArray(metadata.diagnostics) ? metadata.diagnostics[0] : null;
       return React.createElement(
         "div",
         { className: "stash-recommendations__summary" },
@@ -253,7 +256,19 @@
           "div",
           null,
           `Delivered: ratings ${delivered.rating || 0}, plays ${delivered.play || 0}, o ${delivered.o || 0}, snapshots ${delivered.snapshot || 0}`
-        )
+        ),
+        React.createElement(
+          "div",
+          null,
+          `Metadata: pending ${metadataJobs.pending || 0}, in progress ${metadataJobs.in_progress || 0}, completed ${metadataJobs.completed || 0}`
+        ),
+        diagnostic
+          ? React.createElement(
+              "div",
+              null,
+              `Metadata retry: ${diagnostic.stash_id} (${diagnostic.endpoint}): ${diagnostic.last_error}`
+            )
+          : null
       );
     }
 
@@ -358,9 +373,14 @@
       }
       if (state.status?.outbox?.paused?.active) {
         return React.createElement(
-          RecommendationState,
+          React.Fragment,
           null,
-          state.status.outbox.paused.reason || "Service authentication is paused."
+          React.createElement(OutboxSummary, { status: state.status }),
+          React.createElement(
+            RecommendationState,
+            null,
+            state.status.outbox.paused.reason || "Service authentication is paused."
+          )
         );
       }
       if (!state.items.length) {

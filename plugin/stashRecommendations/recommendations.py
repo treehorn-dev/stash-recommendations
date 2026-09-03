@@ -9,6 +9,7 @@ from rec_plugin.contracts import ContentKey
 from rec_plugin.capture import handle_scene_update
 from rec_plugin.delivery import DeliveryWorker
 from rec_plugin.outbox import Outbox
+from rec_plugin.metadata_jobs import MetadataJobs
 from rec_plugin.service_client import ServiceClient
 from rec_plugin.source_client import SourceClient
 from rec_plugin.settings import Settings
@@ -52,7 +53,7 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
         plugin_config = stash.plugin_config(PLUGIN_ID)
         settings = Settings.from_plugin_config(plugin_config)
         outbox.sync_delivery_pause(settings.delivery_pause_key())
-        output["output"] = build_status_output(settings, outbox.status())
+        output["output"] = _status_output(settings, outbox)
         return
     if mode == "sync-ratings":
         output["output"] = queue_rating_sync(stash, outbox, state, confirmed=bool(args.get("confirmed", False)))
@@ -73,14 +74,14 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
         settings = Settings.from_plugin_config(plugin_config)
         outbox.sync_delivery_pause(settings.delivery_pause_key())
         if not settings.service_url or not settings.api_key:
-            output["output"] = build_status_output(settings, outbox.status())
+            output["output"] = _status_output(settings, outbox)
             return
         delivery = DeliveryWorker(
             outbox,
             ServiceClient(settings),
             pause_key=settings.delivery_pause_key(),
         ).deliver_ready(_utcnow())
-        payload = build_status_output(settings, outbox.status())
+        payload = _status_output(settings, outbox)
         payload["delivery"] = {
             "delivered": delivery.delivered,
             "retried": delivery.retried,
@@ -111,6 +112,16 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
 
 def _plugin_dir(server_connection: dict[str, Any]) -> Path:
     return Path(server_connection.get("PluginDir") or Path(__file__).resolve().parent)
+
+
+def _status_output(settings: Settings, outbox: Outbox) -> dict[str, Any]:
+    jobs = MetadataJobs(outbox.path)
+    payload = build_status_output(settings, outbox.status())
+    payload["metadata"] = {
+        "jobs": jobs.status(),
+        "diagnostics": jobs.diagnostics(),
+    }
+    return payload
 
 
 def _utcnow():

@@ -252,7 +252,7 @@ def test_queue_metadata_sync_deduplicates_keys_and_queues_only_configured_source
     assert payloads[0]["source_updated_at"] == "2026-08-31T00:00:00Z"
 
 
-def test_queue_metadata_sync_enqueues_all_canonical_keys_but_processes_only_bounded_batch(tmp_path: Path) -> None:
+def test_queue_metadata_sync_processes_all_jobs_in_recoverable_claim_batches(tmp_path: Path) -> None:
     database_path = tmp_path / "recommendations.sqlite3"
     stash = FakeStash(
         rated_scenes=[
@@ -291,20 +291,20 @@ def test_queue_metadata_sync_enqueues_all_canonical_keys_but_processes_only_boun
     payloads = _pending_payloads(database_path, "source_snapshot")
 
     assert result == {
-        "queued": 1,
-        "processed": 1,
-        "job_status": {"pending": 1, "in_progress": 0, "completed": 1, "failed": 0},
+        "queued": 2,
+        "processed": 2,
+        "job_status": {"pending": 0, "in_progress": 0, "completed": 2, "failed": 0},
         "kind": "metadata-sync",
     }
-    assert len(payloads) == 1
-    assert payloads[0]["content_key"] == {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"}
+    assert len(payloads) == 2
+    assert [payload["content_key"]["stash_id"] for payload in payloads] == ["scene-1", "scene-2"]
 
     second = queue_metadata_sync(stash, outbox, source, confirmed=True, batch_size=1)
     payloads = _pending_payloads(database_path, "source_snapshot")
 
     assert second == {
-        "queued": 1,
-        "processed": 1,
+        "queued": 0,
+        "processed": 0,
         "job_status": {"pending": 0, "in_progress": 0, "completed": 2, "failed": 0},
         "kind": "metadata-sync",
     }
@@ -373,6 +373,14 @@ def test_queue_metadata_sync_returns_failed_jobs_to_pending_after_processing_err
             {
                 "content_key": {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
                 "error": "timed out",
+            }
+        ],
+        "diagnostics": [
+            {
+                "attempts": 1,
+                "endpoint": "https://box.example/graphql",
+                "last_error": "timed out",
+                "stash_id": "scene-1",
             }
         ],
     }

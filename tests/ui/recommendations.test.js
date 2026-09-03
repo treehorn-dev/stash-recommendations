@@ -145,6 +145,10 @@ test("plugin UI registers route, nav, scene tab, and never renders a seeded API 
           reason: "service authentication failed",
         },
       },
+      metadata: {
+        jobs: { pending: 3, in_progress: 0, completed: 7, failed: 0 },
+        diagnostics: [{ endpoint: "https://box.example/graphql", stash_id: "scene-1", attempts: 2, last_error: "timed out" }],
+      },
     },
   };
   const { routes, patches } = registerUi(state);
@@ -159,6 +163,8 @@ test("plugin UI registers route, nav, scene tab, and never renders a seeded API 
   const markup = renderMarkup(route.component({}));
 
   assert.match(markup, /service authentication failed/);
+  assert.match(markup, /Metadata: pending 3, in progress 0, completed 7/);
+  assert.match(markup, /Metadata retry: scene-1 .* timed out/);
   assert.doesNotMatch(markup, /seeded-secret-api-key/);
 });
 
