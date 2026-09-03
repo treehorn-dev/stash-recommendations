@@ -11,11 +11,12 @@ const DefaultOWeight = 1.5
 
 // Recommendation is a ranked scene returned by a recommendation read.
 type Recommendation struct {
-	ContentKey   domain.ContentKey `json:"content_key"`
-	Score        float64           `json:"score"`
-	Reasons      []string          `json:"reasons"`
-	ModelVersion string            `json:"model_version"`
-	CanonicalURL *string           `json:"canonical_url"`
+	ContentKey      domain.ContentKey `json:"content_key"`
+	Score           float64           `json:"score"`
+	Reasons         []string          `json:"reasons"`
+	ModelVersion    string            `json:"model_version"`
+	CanonicalURL    *string           `json:"canonical_url"`
+	PredictedRating *float64          `json:"predicted_rating"`
 }
 
 type Rating struct {
