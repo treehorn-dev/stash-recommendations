@@ -7,6 +7,7 @@
     api.register(root.PluginApi, root);
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  const DEV_CARD_DEMO = true;
   function fetchRelated(contentKeys, runPluginOperation, limit = 20) {
     return runPluginOperation({
       mode: "fetch-related",
@@ -179,23 +180,9 @@
   }
 
   function formatRecommendationReasons(reasons) {
-    const labels = {
-      content_similarity: "similar content",
-      o_profile: "O history",
-      play_profile: "watch history",
-      rating_profile: "your ratings",
-      session_cooccurrence: "what you watch together",
-    };
-    const priority = ["rating_profile", "play_profile", "o_profile", "session_cooccurrence", "content_similarity"];
-    const known = new Set(Array.isArray(reasons) ? reasons.map(String) : []);
-    const values = priority.filter((reason) => known.delete(reason)).map((reason) => labels[reason]);
-    for (const reason of known) {
-      values.push(reason.replace(/_/g, " "));
-    }
-    if (!values.length) return "";
-    if (values.length === 1) return `Why: ${values[0]}`;
-    const last = values.pop();
-    return `Why: based on ${values.join(", ")}, and ${last}`;
+    return Array.isArray(reasons) && reasons.map(String).includes("content_similarity")
+      ? "Similar content"
+      : "";
   }
 
   function namedItems(values) {
@@ -272,6 +259,7 @@
       : null;
     return {
       countRail: sceneCountRailEntries(scene),
+      date: String(scene.date || ""),
       description: String(scene.details || ""),
       duration: formatDuration(primaryFile?.duration),
       interactiveSpeed: Number.isFinite(Number(scene.interactive_speed)) ? Number(scene.interactive_speed) : null,
@@ -342,6 +330,7 @@
             o_counter
             interactive
             interactive_speed
+            date
             play_history
             o_history
             scene_markers {
@@ -527,11 +516,19 @@
     function RecommendationCard(props) {
       if (SharedComponents?.renderEntityCard) {
         const badgeCells = recommendationBadgeCells(props.entry);
-        const badgeRail = badgeCells.length
+        if (DEV_CARD_DEMO && props.entry.kind === "local") {
+          badgeCells.push(
+            { kind: "score", label: "Demo local rating", source: "local", tone: "rating-100-18", value: "4.5" },
+            { kind: "score", label: "Demo predicted rating", source: "predicted", tone: "rating-100-12", value: "3.1" },
+            { kind: "new", label: "Demo new", value: "New" }
+          );
+        }
+        const visibleBadgeCells = badgeCells.slice(0, 3);
+        const badgeRail = visibleBadgeCells.length
           ? React.createElement(
               "div",
               { className: "stash-recommendations__badge-cells" },
-              ...badgeCells.map((cell) => React.createElement(
+              ...visibleBadgeCells.map((cell, index) => React.createElement(
                 "span",
                 {
                   className: [
@@ -540,7 +537,7 @@
                     cell.source ? `stash-recommendations__badge-cell--${cell.source}` : "",
                     cell.tone ? `stash-recommendations__badge-cell--${cell.tone}` : "",
                   ].filter(Boolean).join(" "),
-                  key: cell.kind,
+                  key: `${cell.kind}-${index}`,
                   title: cell.label,
                 },
                 cell.value || cell.label
@@ -560,6 +557,7 @@
           const posterOverlay = React.createElement(
             "div",
             { className: "stash-recommendations__poster-overlays" },
+            badgeRail ? React.createElement("div", { className: "stash-recommendations__poster-badges" }, badgeRail) : null,
             card.studio
               ? React.createElement(
                   "a",
@@ -588,7 +586,6 @@
           return SharedComponents.renderEntityCard(
             { React },
             {
-              badgeRail,
               className: "stash-recommendations__entity-card",
               countRail: countRail(card.countRail),
               description: card.description,
@@ -596,7 +593,11 @@
                 ? React.createElement("span", null, formatRecommendationReasons(props.entry.reasons))
                 : null,
               mediaRail: heatmap,
-              style: watched ? undefined : { borderColor: "var(--bs-warning, #d39e00)" },
+              style: {
+                backgroundColor: "rgba(20, 42, 45, 0.88)",
+                borderColor: watched ? "#467f7c" : "#d39e00",
+                textColor: "#f1f7f6",
+              },
               showZeroCounts: false,
               thumbnail: card.thumbnail.screenshot
                 ? {
@@ -608,9 +609,10 @@
                   }
                 : null,
               title: React.createElement(
-                "a",
-                { className: "stash-recommendations__entity-title", href: `/scenes/${props.entry.scene.id}` },
-                card.title
+                "div",
+                null,
+                React.createElement("a", { className: "stash-recommendations__entity-title", href: `/scenes/${props.entry.scene.id}` }, card.title),
+                card.date ? React.createElement("div", { className: "stash-recommendations__scene-date" }, card.date) : null
               ),
             }
           );
