@@ -13,6 +13,7 @@ type Config struct {
 	DatabaseURL       string
 	ModelOWeight      float64
 	BuildModelOnStart bool
+	RebuildModelOnce  bool
 }
 
 // Load reads the service configuration from the environment.
@@ -33,10 +34,19 @@ func Load() (Config, error) {
 		}
 		buildModelOnStart = parsed
 	}
+	rebuildModelOnce := false
+	if raw := os.Getenv("REBUILD_MODEL_ONCE"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("REBUILD_MODEL_ONCE must be a boolean")
+		}
+		rebuildModelOnce = parsed
+	}
 	return Config{
 		HTTPAddr:          os.Getenv("HTTP_ADDR"),
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		ModelOWeight:      oWeight,
 		BuildModelOnStart: buildModelOnStart,
+		RebuildModelOnce:  rebuildModelOnce,
 	}, nil
 }

@@ -29,6 +29,14 @@ func main() {
 		log.Fatal(err)
 	}
 	modelRepository := model.NewRepository(repository.Pool())
+	if cfg.RebuildModelOnce {
+		version, err := model.NewBuilder(modelRepository, cfg.ModelOWeight).BuildAndActivate(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("recommendation model build activated version=%s", version)
+		return
+	}
 	if cfg.BuildModelOnStart {
 		if _, err := model.NewBuilder(modelRepository, cfg.ModelOWeight).BuildAndActivate(ctx); err != nil {
 			log.Printf("recommendation model build failed; retaining the prior active version: %v", err)

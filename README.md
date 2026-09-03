@@ -135,6 +135,9 @@ rm -rf "$helper_dir"
 ```
 
 For development, the server also supports `BUILD_MODEL_ON_START=true` on boot.
+For an explicit production rebuild without starting another HTTP listener, run
+the service binary with `REBUILD_MODEL_ONCE=true`; it migrates, activates one
+new model version, logs the version, and exits.
 `MODEL_O_WEIGHT` defaults to `1.5` and may be overridden with a positive
 number. A build stores one 256-dimensional hashed vector per source scene and
 uses bounded pgvector cosine retrieval for related scenes and account profiles;
