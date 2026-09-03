@@ -101,11 +101,14 @@
     };
   }
 
-  function namedValues(values) {
-    return (Array.isArray(values) ? values : [])
+  function namedValues(values, limit = 3) {
+    const names = (Array.isArray(values) ? values : [])
       .map((value) => String(value?.name || ""))
-      .filter(Boolean)
-      .join(", ");
+      .filter(Boolean);
+    if (names.length <= limit) {
+      return names.join(", ");
+    }
+    return `${names.slice(0, limit).join(", ")} + ${names.length - limit} more`;
   }
 
   function describeLocalScene(scene = {}) {

@@ -70,6 +70,19 @@ test("describeLocalScene maps Stash metadata into generic card data", () => {
   });
 });
 
+test("describeLocalScene summarizes high-cardinality metadata for compact cards", () => {
+  const description = describeLocalScene({
+    files: [],
+    groups: [{ group: { name: "Collection A" } }, { group: { name: "Collection B" } }, { group: { name: "Collection C" } }, { group: { name: "Collection D" } }],
+    performers: [{ name: "Performer A" }, { name: "Performer B" }, { name: "Performer C" }, { name: "Performer D" }],
+    tags: [{ name: "Tag A" }, { name: "Tag B" }, { name: "Tag C" }, { name: "Tag D" }, { name: "Tag E" }],
+  });
+
+  assert.equal(description.attributes.find((attribute) => attribute.key === "performers").content, "Performer A, Performer B, Performer C + 1 more");
+  assert.equal(description.attributes.find((attribute) => attribute.key === "tags").content, "Tag A, Tag B, Tag C + 2 more");
+  assert.equal(description.attributes.find((attribute) => attribute.key === "groups").content, "Collection A, Collection B, Collection C + 1 more");
+});
+
 test("partitionRecommendations separates watched, unwatched, and remote candidates", () => {
   const items = [
     { content_key: { endpoint: "https://box.example/graphql", stash_id: "watched" }, watched: true },
