@@ -16,7 +16,8 @@ type recommendationsResponse struct {
 
 func GetRelated(reader model.Reader) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := AccountFromContext(r.Context()); !ok {
+		account, ok := AccountFromContext(r.Context())
+		if !ok {
 			unauthorized(w)
 			return
 		}
@@ -30,7 +31,7 @@ func GetRelated(reader model.Reader) http.Handler {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		items, version, err := reader.Related(r.Context(), key, limit)
+		items, version, err := reader.Related(r.Context(), account.ID, key, limit)
 		if err != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return

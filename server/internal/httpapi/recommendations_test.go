@@ -103,6 +103,33 @@ func TestRecommendationReadsReturnEmptyColdStartAndOmitCanonicalURL(t *testing.T
 	require.Equal(t, json.RawMessage("null"), body.Items[0]["canonical_url"])
 }
 
+func TestRelatedReadsReturnPersonalPredictedRating(t *testing.T) {
+	repository, pool := openRecommendationTestStore(t)
+	ctx := context.Background()
+	account, err := repository.CreateAccount(ctx)
+	require.NoError(t, err)
+	for _, stashID := range []string{"scene-a", "scene-b", "scene-c", "scene-d", "scene-e"} {
+		seedAPIModelRating(t, pool, account.ID, stashID, 1)
+	}
+	seedAPIModelCatalogedScenes(t, pool, "scene-a", "scene-b", "scene-c", "scene-d", "scene-e", "scene-f")
+	modelRepository := model.NewRepository(repository.Pool())
+	_, err = model.NewBuilder(modelRepository, model.DefaultOWeight).BuildAndActivate(ctx)
+	require.NoError(t, err)
+	handler := httpapi.NewMux(httpapi.Dependencies{AccountRepository: repository, RecommendationReader: modelRepository})
+
+	query := url.Values{"endpoint": {apiModelEndpoint}, "stash_id": {"scene-a"}}
+	response := recommendationResponse(t, handler, "/v1/recommendations/related?"+query.Encode(), account.PlaintextKey)
+	for _, item := range response.Items {
+		if item.ContentKey.StashID != "scene-f" {
+			continue
+		}
+		require.NotNil(t, item.PredictedRating)
+		require.InDelta(t, 5, *item.PredictedRating, 0.01)
+		return
+	}
+	t.Fatal("expected scene-f related recommendation")
+}
+
 type recommendationAPIResponse struct {
 	ModelVersion string                 `json:"model_version"`
 	Items        []model.Recommendation `json:"items"`

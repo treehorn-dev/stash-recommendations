@@ -82,7 +82,7 @@ type RecommendationStore interface {
 
 // Reader serves recommendations from the active model version.
 type Reader interface {
-	Related(ctx context.Context, source domain.ContentKey, limit int) ([]Recommendation, string, error)
+	Related(ctx context.Context, accountID string, source domain.ContentKey, limit int) ([]Recommendation, string, error)
 	ForYou(ctx context.Context, accountID string, limit int) ([]Recommendation, string, error)
 }
 
