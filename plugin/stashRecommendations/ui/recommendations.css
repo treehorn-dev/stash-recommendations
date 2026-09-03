@@ -126,7 +126,7 @@
 }
 
 .stash-recommendations__entity-card .stash-composables-entity-card__media-rail {
-  margin-top: -0.5rem;
+  margin-top: 0;
 }
 
 .stash-recommendations__count-popover-content {
@@ -179,25 +179,27 @@
   background: transparent;
 }
 
-.stash-recommendations__badge-cell--beige {
-  --stash-recommendations-score-color: #d6c19a;
-}
-
-.stash-recommendations__badge-cell--yellow {
-  --stash-recommendations-score-color: #e3c95d;
-}
-
-.stash-recommendations__badge-cell--gold {
-  --stash-recommendations-score-color: #e7a33f;
-}
-
-.stash-recommendations__badge-cell--orange {
-  --stash-recommendations-score-color: #e77c3d;
-}
-
-.stash-recommendations__badge-cell--red {
-  --stash-recommendations-score-color: #d84a45;
-}
+.stash-recommendations__badge-cell--rating-100-20 { --stash-recommendations-score-color: #f00; }
+.stash-recommendations__badge-cell--rating-100-19 { --stash-recommendations-score-color: #ff2409; }
+.stash-recommendations__badge-cell--rating-100-18 { --stash-recommendations-score-color: #ff4812; }
+.stash-recommendations__badge-cell--rating-100-17 { --stash-recommendations-score-color: #ff6a07; }
+.stash-recommendations__badge-cell--rating-100-16 { --stash-recommendations-score-color: #ff8000; }
+.stash-recommendations__badge-cell--rating-100-15 { --stash-recommendations-score-color: #fa8804; }
+.stash-recommendations__badge-cell--rating-100-14 { --stash-recommendations-score-color: #f39409; }
+.stash-recommendations__badge-cell--rating-100-13 { --stash-recommendations-score-color: #eca00e; }
+.stash-recommendations__badge-cell--rating-100-12 { --stash-recommendations-score-color: #e7a811; }
+.stash-recommendations__badge-cell--rating-100-11 { --stash-recommendations-score-color: #dfb617; }
+.stash-recommendations__badge-cell--rating-100-10 { --stash-recommendations-score-color: #d2ca20; }
+.stash-recommendations__badge-cell--rating-100-9 { --stash-recommendations-score-color: #cbb526; }
+.stash-recommendations__badge-cell--rating-100-8 { --stash-recommendations-score-color: #c39f2b; }
+.stash-recommendations__badge-cell--rating-100-7 { --stash-recommendations-score-color: #bd8e2f; }
+.stash-recommendations__badge-cell--rating-100-6 { --stash-recommendations-score-color: #b47435; }
+.stash-recommendations__badge-cell--rating-100-5 { --stash-recommendations-score-color: #af7944; }
+.stash-recommendations__badge-cell--rating-100-4 { --stash-recommendations-score-color: #a7805b; }
+.stash-recommendations__badge-cell--rating-100-3 { --stash-recommendations-score-color: #a48363; }
+.stash-recommendations__badge-cell--rating-100-2 { --stash-recommendations-score-color: #9e8974; }
+.stash-recommendations__badge-cell--rating-100-1 { --stash-recommendations-score-color: #9b8c7d; }
+.stash-recommendations__badge-cell--rating-100-0 { --stash-recommendations-score-color: #939393; }
 
 .stash-recommendations__badge-cell--new {
   background: rgba(211, 158, 0, 0.24);
@@ -220,15 +222,13 @@
 }
 
 .stash-recommendations__heatmap {
-  object-fit: fill;
-  opacity: 0.75;
+  height: auto;
   width: 100%;
 }
 
 .stash-recommendations__poster-overlays {
   color: #fff;
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 400;
   height: 100%;
   position: relative;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
@@ -236,20 +236,24 @@
 }
 
 .stash-recommendations__poster-overlay {
-  background: rgba(0, 0, 0, 0.65);
-  border-radius: 0.2rem;
-  padding: 0.15rem 0.35rem;
+  bottom: 1rem;
+  letter-spacing: -0.03rem;
   position: absolute;
+  right: 0.7rem;
 }
 
 .stash-recommendations__poster-overlay--studio {
-  bottom: 0.35rem;
   color: inherit;
-  left: 0.35rem;
-  max-width: calc(100% - 5rem);
+  display: block;
+  font-weight: 900;
+  height: 10%;
+  max-width: 40%;
+  opacity: 0.75;
   overflow: hidden;
+  right: 0.7rem;
   text-decoration: none;
   text-overflow: ellipsis;
+  top: 0.7rem;
   white-space: nowrap;
 }
 
@@ -259,13 +263,14 @@
 }
 
 .stash-recommendations__poster-overlay--duration {
-  bottom: 0.35rem;
-  right: 0.35rem;
+  bottom: 1rem;
+  right: 0.7rem;
 }
 
 .stash-recommendations__poster-overlay--speed {
-  right: 0.35rem;
-  top: 0.35rem;
+  bottom: 1rem;
+  left: 0.7rem;
+  right: auto;
 }
 
 .stash-recommendations__status {

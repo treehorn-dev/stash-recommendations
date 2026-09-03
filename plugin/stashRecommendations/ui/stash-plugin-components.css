@@ -267,8 +267,8 @@
 
 .stash-composables-entity-card__media-rail > img {
   display: block;
-  height: 0.65rem;
-  object-fit: fill;
+  height: auto;
+  max-width: 100%;
   width: 100%;
 }
 
