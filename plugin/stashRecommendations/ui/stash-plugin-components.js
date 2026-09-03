@@ -368,30 +368,129 @@ function filterRankedItems(items, predicate) {
   return (Array.isArray(items) ? items : []).filter(predicate);
 }
 
+function sortRankedItems(items, comparator) {
+  const source = Array.isArray(items) ? items : [];
+  if (typeof comparator !== "function") {
+    return [...source];
+  }
+
+  return source
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => Number(comparator(left.item, right.item)) || left.index - right.index)
+    .map(({ item }) => item);
+}
+
 function paginateRankedItems(items, options = {}) {
   const source = Array.isArray(items) ? items : [];
   const pageSize = Math.max(1, Number(options.pageSize ?? source.length) || 1);
-  const page = Math.max(1, Number(options.page ?? 1) || 1);
+  const pageCount = Math.max(1, Math.ceil(source.length / pageSize));
+  const page = Math.min(pageCount, Math.max(1, Number(options.page ?? 1) || 1));
   const start = (page - 1) * pageSize;
+  const itemsOnPage = source.slice(start, start + pageSize);
 
   return {
-    items: source.slice(start, start + pageSize),
+    end: source.length ? start + itemsOnPage.length : 0,
+    items: itemsOnPage,
     page,
+    pageCount,
     pageSize,
+    start: source.length ? start + 1 : 0,
     total: source.length,
   };
 }
 
 
 
+function renderRankedControls(React, sort, pagination, page) {
+  const sortOptions = Array.isArray(sort?.options) ? sort.options : [];
+  const pageSizeOptions = Array.isArray(pagination?.pageSizeOptions)
+    ? pagination.pageSizeOptions
+    : [];
+  if (!sortOptions.length && !pagination) {
+    return null;
+  }
+
+  return React.createElement(
+    "div",
+    { className: "stash-composables-ranked-controls" },
+    sortOptions.length
+      ? React.createElement(
+          "select",
+          {
+            "aria-label": "Sort recommendations",
+            onChange: (event) => sort.onChange?.(event.target.value),
+            value: sort.value,
+          },
+          ...sortOptions.map((option) => React.createElement(
+            "option",
+            { key: option.value, value: option.value },
+            option.label
+          ))
+        )
+      : null,
+    pagination
+      ? React.createElement(
+          "div",
+          { className: "stash-composables-ranked-controls__paging" },
+          `${page.start}-${page.end} of ${page.total}`,
+          React.createElement(
+            "button",
+            {
+              "aria-label": "Previous page",
+              disabled: page.page <= 1,
+              onClick: () => pagination.onPageChange?.(page.page - 1),
+              type: "button",
+            },
+            "Previous"
+          ),
+          React.createElement(
+            "button",
+            {
+              "aria-label": "Next page",
+              disabled: page.page >= page.pageCount,
+              onClick: () => pagination.onPageChange?.(page.page + 1),
+              type: "button",
+            },
+            "Next"
+          )
+        )
+      : null,
+    pagination && pageSizeOptions.length
+      ? React.createElement(
+          "select",
+          {
+            "aria-label": "Items per page",
+            onChange: (event) => pagination.onPageSizeChange?.(Number(event.target.value)),
+            value: String(page.pageSize),
+          },
+          ...pageSizeOptions.map((pageSize) => React.createElement(
+            "option",
+            { key: pageSize, value: String(pageSize) },
+            `${pageSize} per page`
+          ))
+        )
+      : null
+  );
+}
+
 function renderRankedCollectionSurface(runtime, props = {}) {
   const resolved = resolveRankedItems(props.ranked, props.items, props.keyOf);
   const filtered = filterRankedItems(resolved, props.filterRecord);
-  const page = paginateRankedItems(filtered, props.pagination);
+  const sorted = sortRankedItems(filtered, props.sort?.compare);
+  const page = paginateRankedItems(sorted, props.pagination);
+  const controls = renderRankedControls(runtime.React, props.sort, props.pagination, page);
 
   return renderCollectionSurface(runtime, {
     ...props,
     items: page.items,
+    renderActions: controls || props.renderActions
+      ? () => runtime.React.createElement(
+          "div",
+          { className: "stash-composables-ranked-actions" },
+          controls,
+          props.renderActions ? props.renderActions() : null
+        )
+      : undefined,
     renderItemContext: {
       ...(props.renderItemContext ?? {}),
       totalRankedItems: page.total,

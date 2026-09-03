@@ -247,7 +247,14 @@
       );
     }
 
-    function renderRecommendationSection(name, entries, title) {
+    function recommendationTitle(entry) {
+      if (entry.kind === "local") {
+        return String(entry.scene?.title || "");
+      }
+      return String(entry.item?.title || entry.url || "");
+    }
+
+    function renderRecommendationSection(name, entries, title, controls) {
       if (!SharedComponents?.renderRankedCollectionSurface) {
         return React.createElement(
           "section",
@@ -279,6 +286,27 @@
             entry: record.item,
             key: `${record.item.kind}:${record.item.kind === "local" ? record.item.scene.id : record.item.url}:${index}`,
           }),
+          pagination: {
+            onPageChange: controls.onPageChange,
+            onPageSizeChange: controls.onPageSizeChange,
+            page: controls.page,
+            pageSize: controls.pageSize,
+            pageSizeOptions: [12, 24, 48],
+          },
+          sort: {
+            compare: controls.sort === "title-asc"
+              ? (left, right) => recommendationTitle(left.item).localeCompare(recommendationTitle(right.item))
+              : controls.sort === "title-desc"
+                ? (left, right) => recommendationTitle(right.item).localeCompare(recommendationTitle(left.item))
+                : undefined,
+            onChange: controls.onSortChange,
+            options: [
+              { label: "Recommended", value: "score" },
+              { label: "Title: A-Z", value: "title-asc" },
+              { label: "Title: Z-A", value: "title-desc" },
+            ],
+            value: controls.sort,
+          },
           title,
         }
       );
@@ -404,6 +432,7 @@
 
     function RecommendationPanel(props) {
       const state = useRecommendationState(props.loader, props.dependency);
+      const [sectionControls, setSectionControls] = React.useState({});
 
       if (state.loading) {
         return React.createElement(RecommendationState, null, "Loading recommendations...");
@@ -443,6 +472,27 @@
         unwatched: state.items.filter((entry) => entry.kind === "local" && entry.item?.watched !== true && !localSceneWasWatched(entry.scene)),
         remote: state.items.filter((entry) => entry.kind === "remote"),
       };
+      function controlsFor(name) {
+        const current = sectionControls[name] ?? {};
+        const update = (changes) => setSectionControls((previous) => ({
+          ...previous,
+          [name]: {
+            page: 1,
+            pageSize: 24,
+            sort: "score",
+            ...previous[name],
+            ...changes,
+          },
+        }));
+        return {
+          onPageChange: (page) => update({ page }),
+          onPageSizeChange: (pageSize) => update({ page: 1, pageSize }),
+          onSortChange: (sort) => update({ page: 1, sort }),
+          page: current.page ?? 1,
+          pageSize: current.pageSize ?? 24,
+          sort: current.sort ?? "score",
+        };
+      }
       return React.createElement(
         "div",
         { className: "stash-recommendations" },
@@ -456,7 +506,7 @@
         ["unwatched", "watched", "remote"].map((name) => {
           const entries = sections[name];
           if (!entries.length) return null;
-          return renderRecommendationSection(name, entries, props.sectionTitles[name]);
+          return renderRecommendationSection(name, entries, props.sectionTitles[name], controlsFor(name));
         })
       );
     }
@@ -489,7 +539,7 @@
       return React.createElement(RecommendationPanel, {
         dependency: "for-you",
         loader: function () {
-          return fetchForYou(20, runPluginOperation);
+          return fetchForYou(100, runPluginOperation);
         },
         title: "For You",
         sectionTitles: {
