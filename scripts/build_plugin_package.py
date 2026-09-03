@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -24,6 +25,11 @@ def archive_members() -> list[Path]:
     return members
 
 
+def rendered_manifest(version: str) -> str:
+    manifest = (PLUGIN_ROOT / "stashRecommendations.yml").read_text()
+    return re.sub(r'^version: ".*"$', f'version: "{version}"', manifest, count=1, flags=re.MULTILINE)
+
+
 def build(version: str, output_dir: Path, released_at: datetime) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_name = f"stashRecommendations-{version}.zip"
@@ -31,7 +37,11 @@ def build(version: str, output_dir: Path, released_at: datetime) -> tuple[Path, 
 
     with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
         for member in archive_members():
-            archive.write(member, member.relative_to(PLUGIN_ROOT))
+            member_archive_name = member.relative_to(PLUGIN_ROOT)
+            if member.name == "stashRecommendations.yml":
+                archive.writestr(str(member_archive_name), rendered_manifest(version))
+            else:
+                archive.write(member, member_archive_name)
 
     checksum = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     release_tag = f"v{version}"

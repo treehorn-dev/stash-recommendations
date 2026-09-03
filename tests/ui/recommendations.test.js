@@ -75,11 +75,11 @@ test("local scene lookup batches by endpoint and preserves content-key matches",
 test("formatRecommendationReasons turns model reason codes into one user-facing explanation", () => {
   assert.equal(
     formatRecommendationReasons(["o_profile", "play_profile", "rating_profile"]),
-    "Why: based on your ratings, watch history, and O history"
+    ""
   );
   assert.equal(
     formatRecommendationReasons(["content_similarity"]),
-    "Why: similar content"
+    "Similar content"
   );
   assert.equal(formatRecommendationReasons([]), "");
 });
@@ -118,6 +118,7 @@ test("recommendationBadgeCells labels remote recommendations", () => {
 
 test("describeLocalScene maps Stash metadata into generic card data", () => {
   const description = describeLocalScene({
+    date: "2026-09-03",
     details: "A scene description.",
     files: [{ duration: 3723, video_codec: "h264" }, { video_codec: "hevc" }],
     groups: [{ group: { name: "Collection" } }],
@@ -141,6 +142,7 @@ test("describeLocalScene maps Stash metadata into generic card data", () => {
     screenshot: "/scene/1/screenshot",
   });
   assert.equal(description.duration, "1:02:03");
+  assert.equal(description.date, "2026-09-03");
   assert.equal(description.interactiveSpeed, 140);
   assert.deepEqual(description.studio, { id: "studio-1", name: "Studio One" });
   assert.equal(description.title, "Scene title");
@@ -494,6 +496,7 @@ test("For You maps local scenes into the generic entity card surface", () => {
             files: [{ duration: 3723, video_codec: "h264" }],
             id: "44",
             interactive_speed: 140,
+            date: "2026-09-03",
             o_counter: 2,
             paths: { interactive_heatmap: "/scene/44/heatmap", preview: "/scene/44/preview", screenshot: "/scene/44/screenshot" },
             performers: [{ name: "Performer" }],
@@ -543,30 +546,17 @@ test("For You maps local scenes into the generic entity card surface", () => {
   assert.equal(cards[0].thumbnail.previewSrc, "/scene/44/preview");
   assert.equal(cards[0].mediaRail.props.src, "/scene/44/heatmap");
   assert.equal(cards[0].thumbnail.overlay.props.className, "stash-recommendations__poster-overlays");
-  assert.equal(cards[0].thumbnail.overlay.props.children[0].props.className, "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--studio");
-  assert.equal(cards[0].thumbnail.overlay.props.children[1].props.children, "1:02:03");
-  assert.equal(cards[0].thumbnail.overlay.props.children[2].props.children, 140);
-  assert.equal(cards[0].footer.props.children, "Why: watch history");
+  const posterChildren = cards[0].thumbnail.overlay.props.children.filter(Boolean);
+  const posterBadges = posterChildren.find((child) => child.props.className === "stash-recommendations__poster-badges").props.children.props.children;
+  assert.equal(posterBadges.length, 3);
+  assert.equal(new Set(posterBadges.map((cell) => cell.props.key)).size, 3);
+  assert.equal(posterChildren.find((child) => child.props.className === "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--studio").props.children, "Studio One");
+  assert.equal(posterChildren.find((child) => child.props.className === "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--duration").props.children, "1:02:03");
+  assert.equal(posterChildren.find((child) => child.props.className === "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--speed").props.children, 140);
+  assert.equal(cards[0].footer, null);
   assert.equal(cards[0].header, undefined);
-  assert.deepEqual(
-    cards[0].badgeRail.props.children.map((cell) => ({
-      className: cell.props.className,
-      title: cell.props.title,
-      value: cell.props.children,
-    })),
-    [
-      {
-        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--score stash-recommendations__badge-cell--local stash-recommendations__badge-cell--rating-100-18",
-        title: "Your rating",
-        value: "4.5",
-      },
-      {
-        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--new",
-        title: "New",
-        value: "New",
-      },
-    ]
-  );
+  assert.equal(cards[0].badgeRail, undefined);
+  assert.equal(cards[0].title.props.children[1].props.children, "2026-09-03");
 });
 
 function registerUi(state, StashPluginComponents) {

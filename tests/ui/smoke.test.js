@@ -39,6 +39,18 @@ test("recommendation cards present count controls in a separated native-style ra
   assert.match(css, /\.stash-recommendations__entity-card\s+\.stash-composables-entity-card__count-trigger\s*\{[^}]*background:/s);
 });
 
+test("recommendation cards use flexible details and poster-inset badges", () => {
+  const css = fs.readFileSync(
+    path.resolve(__dirname, "..", "..", "plugin", "stashRecommendations", "ui", "recommendations.css"),
+    "utf8"
+  );
+
+  assert.match(css, /.stash-recommendations__entity-card\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
+  assert.match(css, /.stash-recommendations__entity-card\s+\.stash-composables-entity-card__body\s*\{[^}]*flex:\s*1/s);
+  assert.match(css, /.stash-recommendations__poster-badges\s*\{[^}]*left:/s);
+  assert.match(css, /.stash-recommendations__poster-badges\s*\{[^}]*max-height:/s);
+});
+
 test("recommendation cards use native scene-card heatmap and overlay placement", () => {
   const css = fs.readFileSync(
     path.resolve(__dirname, "..", "..", "plugin", "stashRecommendations", "ui", "recommendations.css"),

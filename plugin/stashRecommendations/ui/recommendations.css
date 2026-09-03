@@ -72,10 +72,14 @@
 
 .stash-recommendations__entity-card {
   align-content: start;
+  display: flex;
+  flex-direction: column;
   max-height: 25rem;
+  min-height: 25rem;
 }
 
 .stash-recommendations__entity-card .stash-composables-entity-card__body {
+  flex: 1;
   min-height: 0;
   overflow: hidden;
 }
@@ -157,6 +161,30 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+
+.stash-recommendations__poster-badges {
+  left: 0.7rem;
+  max-height: calc(100% - 1.4rem);
+  position: absolute;
+  top: 0.7rem;
+}
+
+.stash-recommendations__poster-badges .stash-recommendations__badge-cells {
+  gap: 0.2rem;
+}
+
+.stash-recommendations__poster-badges .stash-recommendations__badge-cell {
+  background-clip: padding-box;
+  min-height: 1.65rem;
+  min-width: 2.2rem;
+}
+
+.stash-recommendations__scene-date {
+  color: var(--bs-secondary-color, rgba(255, 255, 255, 0.7));
+  font-size: 0.8rem;
+  font-weight: 400;
+  margin-top: 0.2rem;
 }
 
 .stash-recommendations__badge-cell {
