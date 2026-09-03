@@ -15,11 +15,17 @@
     }).then(normalizeRecommendationResponse);
   }
 
-  function fetchForYou(limit, runPluginOperation) {
+  function fetchForYou(limit, offset, runPluginOperation) {
     return runPluginOperation({
       mode: "fetch-for-you",
       limit,
+      offset,
     }).then(normalizeRecommendationResponse);
+  }
+
+  function forYouOffsetForPage(page, pageSize, batchSize = 100) {
+    const lastRequiredItem = Math.max(0, Math.floor(Number(page) || 1) * Math.max(1, Math.floor(Number(pageSize) || 1)) - 1);
+    return Math.floor(lastRequiredItem / batchSize) * batchSize;
   }
 
   function resolveLocalRecommendations(items, findScenes, showRemote) {
@@ -727,7 +733,7 @@
       );
     }
 
-    function useRecommendationState(loader, dependency) {
+    function useRecommendationState(loader, dependency, options = {}) {
       const [state, setState] = React.useState({
         error: "",
         items: [],
@@ -739,13 +745,15 @@
       React.useEffect(() => {
         let active = true;
         async function runLoad() {
-          setState({
-            error: "",
-            items: [],
-            loading: true,
-            modelVersion: "",
-            status: null,
-          });
+          setState((previous) => options.append
+            ? { ...previous, error: "", loading: true }
+            : {
+                error: "",
+                items: [],
+                loading: true,
+                modelVersion: "",
+                status: null,
+              });
           try {
             const status = await runPluginOperation({ mode: "status" });
             if (!active) {
@@ -781,13 +789,13 @@
             if (!active) {
               return;
             }
-            setState({
+            setState((previous) => ({
               error: "",
-              items: resolved,
+              items: options.append ? [...previous.items, ...resolved] : resolved,
               loading: false,
               modelVersion: response.model_version,
               status,
-            });
+            }));
           } catch (error) {
             if (!active) {
               return;
@@ -811,7 +819,7 @@
     }
 
     function RecommendationPanel(props) {
-      const state = useRecommendationState(props.loader, props.dependency);
+      const state = useRecommendationState(props.loader, props.dependency, { append: props.append });
       const [sectionControls, setSectionControls] = React.useState({});
 
       if (state.loading) {
@@ -866,8 +874,14 @@
           },
         }));
         return {
-          onPageChange: (page) => update({ page }),
-          onPageSizeChange: (pageSize) => update({ page: 1, pageSize }),
+          onPageChange: (page) => {
+            update({ page });
+            props.onSectionPageChange?.(name, page, current.pageSize ?? 24);
+          },
+          onPageSizeChange: (pageSize) => {
+            update({ page: 1, pageSize });
+            props.onSectionPageChange?.(name, 1, pageSize);
+          },
           onSortChange: (sort) => update({ page: 1, sort }),
           page: current.page ?? 1,
           pageSize: current.pageSize ?? 24,
@@ -917,10 +931,18 @@
     }
 
     function ForYouPage() {
+      const [loadedOffset, setLoadedOffset] = React.useState(0);
       return React.createElement(RecommendationPanel, {
-        dependency: "for-you",
+        append: loadedOffset > 0,
+        dependency: `for-you:${loadedOffset}`,
         loader: function () {
-          return fetchForYou(100, runPluginOperation);
+          return fetchForYou(100, loadedOffset, runPluginOperation);
+        },
+        onSectionPageChange: function (section, page, pageSize) {
+          if (section !== "local") {
+            return;
+          }
+          setLoadedOffset((current) => Math.max(current, forYouOffsetForPage(page, pageSize)));
         },
         title: "For You",
         combineLocalSections: true,
@@ -1004,6 +1026,7 @@
     describeLocalScene,
     fetchForYou,
     fetchRelated,
+    forYouOffsetForPage,
     formatRecommendationReasons,
     partitionRecommendations,
     recommendationBadgeCells,
