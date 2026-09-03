@@ -530,19 +530,22 @@ func (repository *Repository) Related(ctx context.Context, accountID string, sou
 	`, version, accountID, source.Endpoint, source.StashID, normalizeLimit(limit), maxRatingNeighbors, minimumRatingsForPrediction, ratingPredictionPriorWeight)
 }
 
-func (repository *Repository) ForYou(ctx context.Context, accountID string, limit int) ([]Recommendation, string, error) {
+func (repository *Repository) ForYou(ctx context.Context, accountID string, limit, offset int) ([]Recommendation, string, error) {
 	version, found, err := repository.activeVersion(ctx)
 	if err != nil || !found {
 		return nil, version, err
 	}
 	return repository.readRecommendations(ctx, `
-		SELECT source_endpoint, source_stash_id, score, reasons
-			, predicted_rating
-		FROM user_recommendations
-		WHERE model_version_id = $1 AND account_id = $2
-		ORDER BY score DESC, source_endpoint, source_stash_id
-		LIMIT $3
-	`, version, accountID, normalizeLimit(limit))
+		WITH profile AS (SELECT embedding, reasons FROM model_account_profiles WHERE model_version_id = $1 AND account_id = $2),
+		rated AS (SELECT preferences.rating, vectors.embedding FROM current_preferences preferences JOIN model_scene_vectors vectors ON vectors.model_version_id = $1 AND vectors.endpoint = preferences.endpoint AND vectors.stash_id = preferences.stash_id WHERE preferences.account_id = $2),
+		baseline AS (SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean FROM rated),
+		ranked AS (SELECT candidates.endpoint, candidates.stash_id, candidates.embedding, candidates.embedding <=> profile.embedding AS distance FROM model_scene_vectors candidates CROSS JOIN profile WHERE candidates.model_version_id = $1 ORDER BY (candidates.embedding <=> profile.embedding) + 0, candidates.endpoint, candidates.stash_id LIMIT $3 OFFSET $4)
+		SELECT ranked.endpoint, ranked.stash_id, 1 - ranked.distance, profile.reasons,
+		CASE WHEN baseline.rating_count < $5 THEN NULL ELSE ($6 * baseline.account_mean + COALESCE(SUM(nearest.similarity * nearest.rating), 0)) / ($6 + COALESCE(SUM(nearest.similarity), 0)) END
+		FROM ranked CROSS JOIN profile CROSS JOIN baseline LEFT JOIN LATERAL (SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> ranked.embedding)) similarity FROM rated ORDER BY (rated.embedding <=> ranked.embedding) + 0 LIMIT $7) nearest ON true
+		GROUP BY ranked.endpoint, ranked.stash_id, ranked.distance, profile.reasons, baseline.rating_count, baseline.account_mean
+		ORDER BY ranked.distance, ranked.endpoint, ranked.stash_id
+	`, version, accountID, normalizeLimit(limit), max(offset, 0), minimumRatingsForPrediction, ratingPredictionPriorWeight, maxRatingNeighbors)
 }
 
 func (repository *Repository) activeVersion(ctx context.Context) (string, bool, error) {
