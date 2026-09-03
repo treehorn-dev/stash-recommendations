@@ -19,6 +19,7 @@ const {
   recommendationBadgeCells,
   fetchForYou,
   fetchRelated,
+  forYouOffsetForPage,
   partitionRecommendations,
   resolveLocalRecommendations,
 } = require(modulePath);
@@ -303,7 +304,7 @@ test("fetchRelated proxies all content keys through the raw plugin task", async 
   assert.deepEqual(result.items, items);
 });
 
-test("fetchForYou uses the plugin task proxy with page offset", async () => {
+test("fetchForYou forwards the requested limit and offset through the plugin task proxy", async () => {
   const calls = [];
 
   await fetchForYou(8, 16, async (args) => {
@@ -312,6 +313,14 @@ test("fetchForYou uses the plugin task proxy with page offset", async () => {
   });
 
   assert.deepEqual(calls, [{ mode: "fetch-for-you", limit: 8, offset: 16 }]);
+});
+
+test("forYouOffsetForPage loads the next server batch only after the current batch is exhausted", () => {
+  assert.equal(forYouOffsetForPage(1, 24), 0);
+  assert.equal(forYouOffsetForPage(4, 24), 0);
+  assert.equal(forYouOffsetForPage(5, 24), 100);
+  assert.equal(forYouOffsetForPage(3, 48), 100);
+  assert.equal(forYouOffsetForPage(9, 24), 200);
 });
 
 test("plugin UI registers route, nav, scene tab, and never renders a seeded API key", () => {
