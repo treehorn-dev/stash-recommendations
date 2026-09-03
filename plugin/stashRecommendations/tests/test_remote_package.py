@@ -40,5 +40,9 @@ def test_remote_package_catalog_matches_distributable_archive(tmp_path: Path) ->
     assert "stashRecommendations.yml" in names
     assert "recommendations.py" in names
     assert "ui/recommendations.js" in names
+    assert "ui/stash-plugin-components.js" in names
+    assert "ui/stash-plugin-components.css" in names
     assert "rec_plugin/settings.py" in names
     assert manifest["version"] == "0.1.10"
+    assert manifest["ui"]["javascript"][0] == "ui/stash-plugin-components.js"
+    assert manifest["ui"]["css"][0] == "ui/stash-plugin-components.css"

@@ -8,8 +8,10 @@ exec:
 interface: raw
 ui:
   javascript:
+    - ui/stash-plugin-components.js
     - ui/recommendations.js
   css:
+    - ui/stash-plugin-components.css
     - ui/recommendations.css
 settings:
   api_key:

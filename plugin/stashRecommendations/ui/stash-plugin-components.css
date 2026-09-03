@@ -1,0 +1,221 @@
+.stash-composables-selection-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.stash-composables-selection-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.stash-composables-selection-card {
+  background: var(--card-bg, #1d2124);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.4rem;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  position: relative;
+}
+
+.stash-composables-selection-card.is-selected,
+.stash-composables-selection-table tr.is-selected {
+  border-color: rgba(13, 110, 253, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(13, 110, 253, 0.35);
+}
+
+.stash-composables-selection-card__select {
+  position: absolute;
+  right: 0.5rem;
+  top: 0.5rem;
+}
+
+.stash-composables-selection-card__body {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.stash-composables-selection-empty {
+  color: var(--muted, #adb5bd);
+  padding: 1rem 0;
+}
+
+.stash-composables-selection-table td,
+.stash-composables-selection-table th {
+  vertical-align: middle;
+}
+
+.stash-composables-related-entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.stash-composables-related-entity-list__row {
+  align-items: center;
+  border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+  border-radius: 0.5rem;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+}
+
+.stash-composables-related-entity-list__body {
+  min-width: 0;
+}
+
+.stash-composables-related-entity-list__title {
+  font-weight: 600;
+}
+
+.stash-composables-related-entity-list__meta,
+.stash-composables-related-entity-list__empty {
+  color: var(--bs-secondary-color, rgba(255, 255, 255, 0.7));
+}
+
+.stash-composables-related-entity-list__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.stash-composables-search-picker {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.stash-composables-search-picker__input {
+  align-items: center;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.stash-composables-search-picker__results {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.stash-composables-search-picker__result {
+  align-items: center;
+  background: var(--card-bg, #1d2124);
+  border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+  border-radius: 0.5rem;
+  color: inherit;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 0.75rem 1rem;
+  text-align: left;
+}
+
+.stash-composables-search-picker__result-main {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.stash-composables-search-picker__thumb {
+  border-radius: 0.35rem;
+  height: 3rem;
+  object-fit: cover;
+  width: 3rem;
+}
+
+.stash-composables-search-picker__meta,
+.stash-composables-search-picker__empty {
+  color: var(--bs-secondary-color, rgba(255, 255, 255, 0.7));
+}
+
+.stash-composables-collection {
+  display: grid;
+  gap: 1rem;
+}
+
+.stash-composables-collection__header {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.stash-composables-collection__meta {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.stash-composables-collection__items {
+  display: grid;
+  gap: 1rem;
+}
+
+.stash-composables-collection__empty {
+  color: var(--bs-secondary-color, rgba(255, 255, 255, 0.7));
+}
+
+.stash-composables-mode-card {
+  background: var(--card-bg, #1d2124);
+  border: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+  border-radius: 0.5rem;
+  color: inherit;
+  display: grid;
+  gap: 0.75rem;
+  overflow: hidden;
+}
+
+.stash-composables-mode-card--grid,
+.stash-composables-mode-card--wall {
+  padding: 0.75rem;
+}
+
+.stash-composables-mode-card--list {
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 0.75rem 1rem;
+}
+
+.stash-composables-mode-card__image {
+  aspect-ratio: 16 / 9;
+  border-radius: 0.35rem;
+  height: auto;
+  object-fit: cover;
+  width: 100%;
+}
+
+.stash-composables-mode-card--list .stash-composables-mode-card__image {
+  aspect-ratio: 16 / 9;
+  width: 8rem;
+}
+
+.stash-composables-mode-card__body {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.stash-composables-mode-card__title {
+  font-weight: 600;
+}
+
+.stash-composables-mode-card__meta {
+  color: var(--bs-secondary-color, rgba(255, 255, 255, 0.7));
+  display: grid;
+  gap: 0.2rem;
+}
+
+.stash-composables-mode-card__stats,
+.stash-composables-mode-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.stash-composables-mode-card__stat,
+.stash-composables-mode-card__badge {
+  color: var(--bs-secondary-color, rgba(255, 255, 255, 0.7));
+  font-size: 0.9rem;
+}

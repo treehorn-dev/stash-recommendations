@@ -86,6 +86,7 @@
     const { Nav, Tab, Button } = PluginApi.libraries.Bootstrap;
     const { NavLink } = PluginApi.libraries.ReactRouterDOM;
     const getClient = PluginApi.utils.StashService.getClient;
+    const SharedComponents = root.StashPluginComponents;
     const RUN_PLUGIN_OPERATION = Apollo.gql`
       mutation RunPluginOperation($plugin_id: ID!, $args: Map) {
         runPluginOperation(plugin_id: $plugin_id, args: $args)
@@ -206,12 +207,21 @@
 
     function RecommendationCard(props) {
       if (props.entry.kind === "local") {
+        const screenshot = props.entry.scene.paths?.screenshot;
         return React.createElement(
           "a",
           {
             className: "stash-recommendations__card",
             href: `/scenes/${props.entry.scene.id}`,
           },
+          screenshot
+            ? React.createElement("img", {
+                alt: "",
+                className: "stash-recommendations__card-image",
+                loading: "lazy",
+                src: screenshot,
+              })
+            : null,
           React.createElement("div", { className: "stash-recommendations__card-title" }, props.entry.scene.title || "[Untitled Scene]"),
           React.createElement(
             "div",
@@ -234,6 +244,43 @@
           { className: "stash-recommendations__card-meta" },
           props.entry.reasons.join(", ")
         )
+      );
+    }
+
+    function renderRecommendationSection(name, entries, title) {
+      if (!SharedComponents?.renderRankedCollectionSurface) {
+        return React.createElement(
+          "section",
+          { className: "stash-recommendations__section", key: name },
+          React.createElement("h3", null, title),
+          React.createElement(
+            "div",
+            { className: "stash-recommendations__grid" },
+            entries.map((entry, index) => React.createElement(RecommendationCard, {
+              entry,
+              key: `${entry.kind}:${entry.kind === "local" ? entry.scene.id : entry.url}:${index}`,
+            }))
+          )
+        );
+      }
+
+      return SharedComponents.renderRankedCollectionSurface(
+        { React, Spinner: "span" },
+        {
+          headingElement: "h3",
+          items: entries,
+          itemsClassName: "stash-recommendations__grid",
+          keyOf: (entry) => entry.kind === "local" ? entry.scene.id : entry.url,
+          ranked: entries.map((entry) => ({
+            key: entry.kind === "local" ? entry.scene.id : entry.url,
+            score: entry.score,
+          })),
+          renderItem: (record, index) => React.createElement(RecommendationCard, {
+            entry: record.item,
+            key: `${record.item.kind}:${record.item.kind === "local" ? record.item.scene.id : record.item.url}:${index}`,
+          }),
+          title,
+        }
       );
     }
 
@@ -409,19 +456,7 @@
         ["unwatched", "watched", "remote"].map((name) => {
           const entries = sections[name];
           if (!entries.length) return null;
-          return React.createElement(
-            "section",
-            { className: "stash-recommendations__section", key: name },
-            React.createElement("h3", null, props.sectionTitles[name]),
-            React.createElement(
-              "div",
-              { className: "stash-recommendations__grid" },
-              entries.map((entry, index) => React.createElement(RecommendationCard, {
-                entry,
-                key: `${entry.kind}:${entry.kind === "local" ? entry.scene.id : entry.url}:${index}`,
-              }))
-            )
-          );
+          return renderRecommendationSection(name, entries, props.sectionTitles[name]);
         })
       );
     }

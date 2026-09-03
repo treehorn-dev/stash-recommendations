@@ -43,6 +43,13 @@
   text-decoration: none;
 }
 
+.stash-recommendations__card-image {
+  aspect-ratio: 16 / 9;
+  border-radius: 0.45rem;
+  object-fit: cover;
+  width: 100%;
+}
+
 .stash-recommendations__card:hover {
   border-color: rgba(255, 255, 255, 0.2);
   text-decoration: none;
