@@ -20,6 +20,7 @@ func TestMigrationLedgerIncludesPgvectorRecommendations(t *testing.T) {
 		versions = append(versions, migration.version)
 	}
 	require.Contains(t, versions, "009_pgvector_recommendations")
+	require.Contains(t, versions, "010_predicted_ratings")
 }
 
 func TestMigrateCreatesBaseStorageTables(t *testing.T) {
@@ -59,6 +60,17 @@ func TestMigrateCreatesBaseStorageTables(t *testing.T) {
 		require.NoError(t, repository.pool.QueryRow(context.Background(), "SELECT to_regclass('public.' || $1)", table).Scan(&actual))
 		require.Equal(t, table, actual)
 	}
+	var exists bool
+	require.NoError(t, repository.pool.QueryRow(context.Background(), `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = 'user_recommendations'
+				AND column_name = 'predicted_rating'
+		)
+	`).Scan(&exists))
+	require.True(t, exists)
 }
 
 func TestCreateAccountStoresHashUnderAPIKeyIdentifier(t *testing.T) {
@@ -121,7 +133,7 @@ func TestMigrateUpgradesLegacyAPIKeySchema(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations", "010_predicted_ratings"}, versions)
 }
 
 func TestMigrateAddsSessionProjectionTablesToExistingStore(t *testing.T) {
@@ -154,7 +166,7 @@ func TestMigrateAddsSessionProjectionTablesToExistingStore(t *testing.T) {
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations", "010_predicted_ratings"}, versions)
 }
 
 func TestMigrateAddsSourceCatalogProjectionColumnsToExistingStore(t *testing.T) {
@@ -211,7 +223,7 @@ func TestMigrateAddsSourceCatalogProjectionColumnsToExistingStore(t *testing.T) 
 		versions = append(versions, version)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations"}, versions)
+	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations", "010_predicted_ratings"}, versions)
 }
 
 func openIsolatedMigrationStore(t *testing.T) *Store {

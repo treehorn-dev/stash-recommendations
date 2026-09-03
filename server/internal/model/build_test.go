@@ -55,6 +55,32 @@ func TestBuildPersistsBehavioralOnlySessionScene(t *testing.T) {
 	require.Contains(t, recommendationIDs(items), "behavioral")
 }
 
+func TestBuildPersistsPredictedRatingForForYou(t *testing.T) {
+	repository, pool := openModelTestStore(t)
+	ctx := context.Background()
+	account := seedModelAccount(t, pool)
+
+	seedSharedTagScenes(t, pool, "rating-1", "rating-2", "rating-3", "rating-4", "rating-5", "candidate")
+	for _, stashID := range []string{"rating-1", "rating-2", "rating-3", "rating-4", "rating-5"} {
+		seedRating(t, pool, account, stashID, 1)
+	}
+
+	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
+	require.NoError(t, err)
+
+	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
+	require.NoError(t, err)
+	for _, item := range items {
+		if item.ContentKey.StashID != "candidate" {
+			continue
+		}
+		require.NotNil(t, item.PredictedRating)
+		require.InDelta(t, 5, *item.PredictedRating, 0.01)
+		return
+	}
+	t.Fatal("expected candidate recommendation")
+}
+
 func TestCatalogCandidatesIncludeValidatedSceneAttributes(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
@@ -223,6 +249,25 @@ func seedSharedPerformer(t *testing.T, pool *pgxpool.Pool, firstID, secondID str
 	}
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO source_performers (endpoint, stash_id, name) VALUES ($1, 'performer-1', 'Performer')
+	`, modelEndpoint)
+	require.NoError(t, err)
+}
+
+func seedSharedTagScenes(t *testing.T, pool *pgxpool.Pool, stashIDs ...string) {
+	t.Helper()
+	for _, stashID := range stashIDs {
+		_, err := pool.Exec(context.Background(), `
+			INSERT INTO source_scenes (endpoint, stash_id) VALUES ($1, $2)
+		`, modelEndpoint, stashID)
+		require.NoError(t, err)
+		_, err = pool.Exec(context.Background(), `
+			INSERT INTO source_scene_tags (scene_endpoint, scene_stash_id, tag_endpoint, tag_stash_id)
+			VALUES ($1, $2, $1, 'tag-1')
+		`, modelEndpoint, stashID)
+		require.NoError(t, err)
+	}
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO source_tags (endpoint, stash_id, name) VALUES ($1, 'tag-1', 'Tag')
 	`, modelEndpoint)
 	require.NoError(t, err)
 }
