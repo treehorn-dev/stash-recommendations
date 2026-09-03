@@ -73,7 +73,9 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
         plugin_config = stash.plugin_config(PLUGIN_ID)
         settings = Settings.from_plugin_config(plugin_config)
         outbox.sync_delivery_pause(settings.delivery_pause_key())
+        _task_log(f"delivery start pending={outbox.status()['pending']}")
         if not settings.service_url or not settings.api_key:
+            _task_log("delivery skipped because service URL or API key is not configured")
             output["output"] = _status_output(settings, outbox)
             return
         delivery = DeliveryWorker(
@@ -88,6 +90,11 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
             "quarantined": delivery.quarantined,
             "paused": delivery.paused,
         }
+        _task_log(
+            "delivery finished "
+            f"delivered={delivery.delivered} retried={delivery.retried} "
+            f"quarantined={delivery.quarantined} paused={delivery.paused}"
+        )
         output["output"] = payload
         return
     if mode == "fetch-related":
@@ -128,6 +135,10 @@ def _utcnow():
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc)
+
+
+def _task_log(message: str) -> None:
+    print(f"[Stash Recommendations] {message}", file=sys.stderr, flush=True)
 
 
 def _fetch_related(service: ServiceClient, content_keys: list[dict[str, Any]], limit: int) -> dict[str, Any]:

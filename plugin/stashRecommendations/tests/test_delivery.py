@@ -121,6 +121,35 @@ def test_delivery_status_records_redacted_latest_attempt(tmp_path: Path, monkeyp
     }
 
 
+def test_deliver_outbox_logs_start_and_summary(tmp_path: Path, monkeypatch: object, capsys: object) -> None:
+    freeze_outbox_now(monkeypatch)
+    seeded_outbox(tmp_path)
+    monkeypatch.setattr("recommendations.StashClient", lambda server_connection: FakeConfiguredStash(tmp_path))
+    monkeypatch.setattr(
+        "recommendations.ServiceClient",
+        lambda settings: FakeServiceClient([ServiceResponse(status_code=202)]),
+    )
+
+    output: dict[str, object] = {}
+    run(
+        {
+            "server_connection": {"PluginDir": str(tmp_path)},
+            "args": {"mode": "deliver-outbox"},
+        },
+        output,
+    )
+
+    assert output["output"]["delivery"] == {
+        "delivered": 1,
+        "retried": 0,
+        "quarantined": 0,
+        "paused": False,
+    }
+    captured = capsys.readouterr().err
+    assert "delivery start pending={'rating': 1, 'play': 0, 'o': 0, 'snapshot': 0, 'hook': 0}" in captured
+    assert "delivery finished delivered=1 retried=0 quarantined=0 paused=False" in captured
+
+
 def test_service_client_timeout_reaches_retry_without_quarantine(tmp_path: Path, monkeypatch: object) -> None:
     freeze_outbox_now(monkeypatch)
     outbox = seeded_outbox(tmp_path)
