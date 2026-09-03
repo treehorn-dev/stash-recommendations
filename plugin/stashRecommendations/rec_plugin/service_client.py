@@ -79,7 +79,7 @@ def _decode_error(body: dict[str, Any] | None, response: Any) -> str | None:
 
 def _decode_json(response: Any) -> dict[str, Any] | None:
     payload = response.read()
-    if not payload:
+    if not payload.strip():
         return None
     return json.loads(payload.decode("utf-8"))
 
