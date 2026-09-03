@@ -80,6 +80,39 @@
     };
   }
 
+  function namedValues(values) {
+    return (Array.isArray(values) ? values : [])
+      .map((value) => String(value?.name || ""))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  function describeLocalScene(scene = {}) {
+    const files = Array.isArray(scene.files) ? scene.files : [];
+    const mediaKinds = new Set(files.map((file) => file?.video_codec ? "video" : "file"));
+    const mediaLabel = files.length === 1
+      ? `1 ${mediaKinds.has("video") ? "video" : "media"} file`
+      : `${files.length} ${mediaKinds.size === 1 && mediaKinds.has("video") ? "video " : ""}files`;
+    const attributes = [
+      { content: namedValues(scene.performers), key: "performers", label: "Performers" },
+      { content: namedValues(scene.tags), key: "tags", label: "Tags" },
+      { content: namedValues((Array.isArray(scene.groups) ? scene.groups : []).map((entry) => entry?.group)), key: "groups", label: "Groups" },
+      { content: String(scene.play_count ?? 0), key: "plays", label: "Plays" },
+      { content: String(scene.o_counter ?? 0), key: "o-count", label: "O" },
+      { content: mediaLabel, key: "media", label: "Media" },
+    ].filter((attribute) => attribute.content !== "");
+
+    return {
+      attributes,
+      description: String(scene.details || ""),
+      thumbnail: {
+        heatmap: scene.paths?.interactive_heatmap || "",
+        screenshot: scene.paths?.screenshot || "",
+      },
+      title: String(scene.title || "[Untitled Scene]"),
+    };
+  }
+
   function register(PluginApi, root) {
     const React = PluginApi.React;
     const Apollo = PluginApi.libraries.Apollo;
@@ -119,10 +152,32 @@
           scenes {
             id
             title
+            details
+            play_count
+            o_counter
             play_history
             o_history
             paths {
               screenshot
+              interactive_heatmap
+            }
+            files {
+              id
+              video_codec
+            }
+            performers {
+              id
+              name
+            }
+            tags {
+              id
+              name
+            }
+            groups {
+              group {
+                id
+                name
+              }
             }
             stash_ids {
               endpoint
@@ -206,6 +261,67 @@
     }
 
     function RecommendationCard(props) {
+      if (SharedComponents?.renderEntityCard) {
+        if (props.entry.kind === "local") {
+          const watched = props.entry.item?.watched === true || localSceneWasWatched(props.entry.scene);
+          const card = describeLocalScene(props.entry.scene);
+          const heatmap = card.thumbnail.heatmap
+            ? React.createElement("img", {
+                alt: "Motion heatmap",
+                className: "stash-recommendations__heatmap",
+                src: card.thumbnail.heatmap,
+              })
+            : null;
+          return SharedComponents.renderEntityCard(
+            { React },
+            {
+              attributes: card.attributes,
+              className: "stash-recommendations__entity-card",
+              description: card.description,
+              footer: props.entry.reasons.length
+                ? React.createElement("span", null, props.entry.reasons.join(", "))
+                : null,
+              header: watched
+                ? null
+                : React.createElement("span", { className: "stash-recommendations__status stash-recommendations__status--unwatched" }, "Unwatched"),
+              style: watched ? undefined : { borderColor: "var(--bs-warning, #d39e00)" },
+              thumbnail: card.thumbnail.screenshot
+                ? { alt: "", overlay: heatmap, src: card.thumbnail.screenshot }
+                : null,
+              title: React.createElement(
+                "a",
+                { className: "stash-recommendations__entity-title", href: `/scenes/${props.entry.scene.id}` },
+                card.title
+              ),
+            }
+          );
+        }
+        return SharedComponents.renderEntityCard(
+          { React },
+          {
+            className: "stash-recommendations__entity-card stash-recommendations__entity-card--remote",
+            footer: props.entry.reasons.length
+              ? React.createElement("span", null, props.entry.reasons.join(", "))
+              : null,
+            header: React.createElement("span", { className: "stash-recommendations__status stash-recommendations__status--remote" }, "Not in your stash"),
+            style: {
+              backgroundColor: "rgba(255, 255, 255, 0.02)",
+              borderColor: "rgba(255, 255, 255, 0.22)",
+              textColor: "rgba(255, 255, 255, 0.72)",
+            },
+            title: React.createElement(
+              "a",
+              {
+                className: "stash-recommendations__entity-title",
+                href: props.entry.url,
+                rel: "noreferrer",
+                target: "_blank",
+              },
+              "Open remote scene"
+            ),
+          }
+        );
+      }
       if (props.entry.kind === "local") {
         const screenshot = props.entry.scene.paths?.screenshot;
         return React.createElement(
@@ -468,6 +584,7 @@
         );
       }
       const sections = {
+        local: state.items.filter((entry) => entry.kind === "local"),
         watched: state.items.filter((entry) => entry.kind === "local" && (entry.item?.watched === true || localSceneWasWatched(entry.scene))),
         unwatched: state.items.filter((entry) => entry.kind === "local" && entry.item?.watched !== true && !localSceneWasWatched(entry.scene)),
         remote: state.items.filter((entry) => entry.kind === "remote"),
@@ -503,7 +620,7 @@
           React.createElement("h2", null, props.title),
           React.createElement("div", { className: "stash-recommendations__version" }, state.modelVersion || "")
         ),
-        ["unwatched", "watched", "remote"].map((name) => {
+        (props.combineLocalSections ? ["local", "remote"] : ["unwatched", "watched", "remote"]).map((name) => {
           const entries = sections[name];
           if (!entries.length) return null;
           return renderRecommendationSection(name, entries, props.sectionTitles[name], controlsFor(name));
@@ -542,7 +659,9 @@
           return fetchForYou(100, runPluginOperation);
         },
         title: "For You",
+        combineLocalSections: true,
         sectionTitles: {
+          local: "For You",
           unwatched: "Explore your stash",
           watched: "Watch again from your stash",
           remote: "Grow your stash",
@@ -618,6 +737,7 @@
   }
 
   return {
+    describeLocalScene,
     fetchForYou,
     fetchRelated,
     partitionRecommendations,

@@ -13,11 +13,40 @@ const modulePath = path.resolve(
 );
 
 const {
+  describeLocalScene,
   fetchForYou,
   fetchRelated,
   partitionRecommendations,
   resolveLocalRecommendations,
 } = require(modulePath);
+
+test("describeLocalScene maps Stash metadata into generic card data", () => {
+  const description = describeLocalScene({
+    details: "A scene description.",
+    files: [{ video_codec: "h264" }, { video_codec: "hevc" }],
+    groups: [{ group: { name: "Collection" } }],
+    o_counter: 3,
+    paths: { interactive_heatmap: "/scene/1/heatmap", screenshot: "/scene/1/screenshot" },
+    performers: [{ name: "Performer A" }, { name: "Performer B" }],
+    play_count: 7,
+    tags: [{ name: "Tag A" }, { name: "Tag B" }],
+    title: "Scene title",
+  });
+
+  assert.deepEqual(description, {
+    attributes: [
+      { content: "Performer A, Performer B", key: "performers", label: "Performers" },
+      { content: "Tag A, Tag B", key: "tags", label: "Tags" },
+      { content: "Collection", key: "groups", label: "Groups" },
+      { content: "7", key: "plays", label: "Plays" },
+      { content: "3", key: "o-count", label: "O" },
+      { content: "2 video files", key: "media", label: "Media" },
+    ],
+    description: "A scene description.",
+    thumbnail: { heatmap: "/scene/1/heatmap", screenshot: "/scene/1/screenshot" },
+    title: "Scene title",
+  });
+});
 
 test("partitionRecommendations separates watched, unwatched, and remote candidates", () => {
   const items = [
@@ -202,7 +231,7 @@ test("For You renders local recommendations through the shared ranked collection
   route.component({});
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].title, "Explore your stash");
+  assert.equal(calls[0].title, "For You");
   assert.deepEqual(calls[0].ranked, [{ key: "44", score: 0.9 }]);
   assert.deepEqual(calls[0].pagination, {
     onPageChange: calls[0].pagination.onPageChange,
@@ -217,6 +246,57 @@ test("For You renders local recommendations through the shared ranked collection
     { label: "Title: Z-A", value: "title-desc" },
   ]);
   assert.equal(calls[0].sort.value, "score");
+});
+
+test("For You maps local scenes into the generic entity card surface", () => {
+  const cards = [];
+  const { routes } = registerUi(
+    {
+      error: "",
+      items: [
+        {
+          kind: "local",
+          item: { watched: false },
+          scene: {
+            files: [{ video_codec: "h264" }],
+            id: "44",
+            o_counter: 2,
+            paths: { interactive_heatmap: "/scene/44/heatmap", screenshot: "/scene/44/screenshot" },
+            performers: [{ name: "Performer" }],
+            play_count: 3,
+            tags: [{ name: "Tag" }],
+            title: "Local Scene",
+          },
+          reasons: ["play_profile"],
+          score: 0.9,
+        },
+      ],
+      loading: false,
+      modelVersion: "model-1",
+      status: {
+        configured: true,
+        settings: { api_key_configured: true, show_remote_results: false },
+        outbox: { pending: {}, delivered: {}, paused: { active: false, reason: null } },
+      },
+    },
+    {
+      renderEntityCard(runtime, props) {
+        cards.push(props);
+        return runtime.React.createElement("entity-card", null);
+      },
+      renderRankedCollectionSurface(runtime, props) {
+        return props.renderItem({ item: props.items[0] }, 0);
+      },
+    }
+  );
+
+  routes.find((entry) => entry.path === "/plugins/stash-recommendations").component({});
+
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].attributes.find((attribute) => attribute.key === "performers").content, "Performer");
+  assert.equal(cards[0].attributes.find((attribute) => attribute.key === "o-count").content, "2");
+  assert.equal(cards[0].thumbnail.overlay.props.src, "/scene/44/heatmap");
+  assert.equal(cards[0].header.props.children, "Unwatched");
 });
 
 function registerUi(state, StashPluginComponents) {
