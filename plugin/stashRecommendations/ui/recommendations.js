@@ -33,6 +33,56 @@
     return Number(receivedCount) >= Number(batchSize) && Number(visibleCount) < 49;
   }
 
+  function contentKeyFor(contentKey) {
+    return `${contentKey.endpoint}::${contentKey.stash_id}`;
+  }
+
+  function localSceneLookupBatches(items, batchSize = 20) {
+    const idsByEndpoint = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      const contentKey = item?.content_key;
+      if (!contentKey?.endpoint || !contentKey?.stash_id) {
+        continue;
+      }
+      if (!idsByEndpoint.has(contentKey.endpoint)) {
+        idsByEndpoint.set(contentKey.endpoint, new Set());
+      }
+      idsByEndpoint.get(contentKey.endpoint).add(contentKey.stash_id);
+    }
+
+    const batches = [];
+    for (const [endpoint, stashIDs] of idsByEndpoint) {
+      const ids = [...stashIDs];
+      for (let index = 0; index < ids.length; index += batchSize) {
+        batches.push({ endpoint, stash_ids: ids.slice(index, index + batchSize) });
+      }
+    }
+    return batches;
+  }
+
+  function indexLocalSceneMatches(items, scenes) {
+    const requested = new Set(
+      (Array.isArray(items) ? items : [])
+        .map((item) => item?.content_key)
+        .filter((contentKey) => contentKey?.endpoint && contentKey?.stash_id)
+        .map(contentKeyFor)
+    );
+    const matches = {};
+    for (const scene of Array.isArray(scenes) ? scenes : []) {
+      for (const stashID of Array.isArray(scene?.stash_ids) ? scene.stash_ids : []) {
+        if (!stashID?.endpoint || !stashID?.stash_id) {
+          continue;
+        }
+        const key = contentKeyFor(stashID);
+        if (!requested.has(key)) {
+          continue;
+        }
+        (matches[key] ||= []).push(scene);
+      }
+    }
+    return matches;
+  }
+
   function resolveLocalRecommendations(items, findScenes, showRemote) {
     return (Array.isArray(items) ? items : []).flatMap((item) => {
       const scenes = findScenes(item) || [];
@@ -272,16 +322,16 @@
       }
     `;
     const FIND_LOCAL_SCENES = Apollo.gql`
-      query FindLocalRecommendationScenes($endpoint: String!, $stash_id: String!) {
+      query FindLocalRecommendationScenes($endpoint: String!, $stash_ids: [String!]!) {
         findScenes(
           scene_filter: {
-            stash_id_endpoint: {
+            stash_ids_endpoint: {
               endpoint: $endpoint
-              stash_id: $stash_id
+              stash_ids: $stash_ids
               modifier: EQUALS
             }
           }
-          filter: { per_page: 5 }
+          filter: { per_page: 100 }
         ) {
           scenes {
             id
@@ -410,7 +460,7 @@
     }
 
     function keyFor(contentKey) {
-      return `${contentKey.endpoint}::${contentKey.stash_id}`;
+      return contentKeyFor(contentKey);
     }
 
     async function runPluginOperation(args) {
@@ -453,23 +503,17 @@
     }
 
     async function loadLocalSceneMatches(items) {
-      const matches = {};
-      for (const item of Array.isArray(items) ? items : []) {
-        const contentKey = item?.content_key;
-        if (!contentKey?.endpoint || !contentKey?.stash_id) {
-          continue;
-        }
-        const response = await getClient().query({
+      const responses = await Promise.all(localSceneLookupBatches(items).map((batch) =>
+        getClient().query({
           query: FIND_LOCAL_SCENES,
-          variables: {
-            endpoint: contentKey.endpoint,
-            stash_id: contentKey.stash_id,
-          },
+          variables: batch,
           fetchPolicy: "network-only",
-        });
-        matches[keyFor(contentKey)] = response.data?.findScenes?.scenes ?? [];
-      }
-      return matches;
+        })
+      ));
+      return indexLocalSceneMatches(
+        items,
+        responses.flatMap((response) => response.data?.findScenes?.scenes ?? [])
+      );
     }
 
     function RecommendationState(props) {
@@ -1063,6 +1107,8 @@
     fetchRelated,
     forYouOffsetForPage,
     formatRecommendationReasons,
+    indexLocalSceneMatches,
+    localSceneLookupBatches,
     partitionRecommendations,
     recommendationBadgeCells,
     register,
