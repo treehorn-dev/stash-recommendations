@@ -34,8 +34,8 @@ class ServiceClient:
             raise ValueError(response.error or f"service request failed with status {response.status_code}")
         return dict(response.body or {})
 
-    def fetch_for_you(self, limit: int) -> dict[str, Any]:
-        query = parse.urlencode({"limit": str(limit)})
+    def fetch_for_you(self, limit: int, *, offset: int = 0) -> dict[str, Any]:
+        query = parse.urlencode({"limit": str(limit), "offset": str(max(0, offset))})
         response = self._request_json("GET", f"/v1/recommendations/for-you?{query}", None)
         if response.status_code != 200:
             raise ValueError(response.error or f"service request failed with status {response.status_code}")

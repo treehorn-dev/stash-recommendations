@@ -113,7 +113,9 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
         if not settings.service_url or not settings.api_key:
             output["output"] = {"model_version": "", "items": []}
             return
-        output["output"] = ServiceClient(settings).fetch_for_you(int(args.get("limit", 20)))
+        output["output"] = ServiceClient(settings).fetch_for_you(
+            int(args.get("limit", 20)), offset=int(args.get("offset", 0))
+        )
         return
     raise ValueError(f"unsupported mode: {mode}")
 
