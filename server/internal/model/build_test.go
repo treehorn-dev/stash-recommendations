@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -34,13 +35,12 @@ func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T
 	require.NoError(t, err)
 	require.Zero(t, materializedRecommendationCount)
 
-	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("scene-a"), 10)
+	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, contentKey("scene-a"), 10)
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
 	require.Equal(t, []string{"scene-b"}, recommendationIDs(items))
 	require.Contains(t, reasonsFor(items, "scene-b"), "content_similarity")
 	require.Nil(t, items[0].CanonicalURL)
-	require.Nil(t, items[0].PredictedRating)
 
 	forYou, activeVersion, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10, 0)
 	require.NoError(t, err)
@@ -64,16 +64,15 @@ func TestBuildPersistsBehavioralOnlySessionScene(t *testing.T) {
 
 	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
-	items, _, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("metadata"), 10)
+	items, _, err := NewRepository(repository.Pool()).Related(ctx, contentKey("metadata"), 10)
 	require.NoError(t, err)
 	require.Contains(t, recommendationIDs(items), "behavioral")
 }
 
-func TestBuildPersistsPredictedRatingForForYou(t *testing.T) {
+func TestForYouIncludesPredictedRatingForSufficientRatingHistory(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
 	account := seedModelAccount(t, pool)
-
 	seedSharedTagScenes(t, pool, "rating-1", "rating-2", "rating-3", "rating-4", "rating-5", "candidate")
 	for _, stashID := range []string{"rating-1", "rating-2", "rating-3", "rating-4", "rating-5"} {
 		seedRating(t, pool, account, stashID, 1)
@@ -81,41 +80,15 @@ func TestBuildPersistsPredictedRatingForForYou(t *testing.T) {
 
 	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
-
-	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
+	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10, 0)
 	require.NoError(t, err)
 	for _, item := range items {
-		if item.ContentKey.StashID != "candidate" {
-			continue
+		if item.ContentKey.StashID == "candidate" {
+			field := reflect.ValueOf(item).FieldByName("PredictedRating")
+			require.True(t, field.IsValid(), "For You recommendation must expose PredictedRating")
+			require.NotNil(t, field.Interface())
+			return
 		}
-		require.NotNil(t, item.PredictedRating)
-		require.InDelta(t, 5, *item.PredictedRating, 0.01)
-		return
-	}
-	t.Fatal("expected candidate recommendation")
-}
-
-func TestRelatedReturnsPersonalPredictedRating(t *testing.T) {
-	repository, pool := openModelTestStore(t)
-	ctx := context.Background()
-	account := seedModelAccount(t, pool)
-
-	seedSharedTagScenes(t, pool, "rating-1", "rating-2", "rating-3", "rating-4", "rating-5", "candidate")
-	for _, stashID := range []string{"rating-1", "rating-2", "rating-3", "rating-4", "rating-5"} {
-		seedRating(t, pool, account, stashID, 1)
-	}
-	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
-	require.NoError(t, err)
-
-	items, _, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("rating-1"), 10)
-	require.NoError(t, err)
-	for _, item := range items {
-		if item.ContentKey.StashID != "candidate" {
-			continue
-		}
-		require.NotNil(t, item.PredictedRating)
-		require.InDelta(t, 5, *item.PredictedRating, 0.01)
-		return
 	}
 	t.Fatal("expected candidate recommendation")
 }
@@ -189,7 +162,7 @@ func TestFailedBuildKeepsActiveVersion(t *testing.T) {
 	_, err = builder.BuildAndActivate(ctx)
 	require.ErrorContains(t, err, "forced model build failure")
 
-	_, actualActiveVersion, err := NewRepository(repository.Pool()).Related(ctx, accountID, contentKey("scene-a"), 10)
+	_, actualActiveVersion, err := NewRepository(repository.Pool()).Related(ctx, contentKey("scene-a"), 10)
 	require.NoError(t, err)
 	require.Equal(t, activeVersion, actualActiveVersion)
 }
@@ -292,12 +265,18 @@ func seedSharedPerformer(t *testing.T, pool *pgxpool.Pool, firstID, secondID str
 	require.NoError(t, err)
 }
 
+func seedCatalogedScenes(t *testing.T, pool *pgxpool.Pool, stashIDs ...string) {
+	t.Helper()
+	for _, stashID := range stashIDs {
+		_, err := pool.Exec(context.Background(), `INSERT INTO source_scenes (endpoint, stash_id) VALUES ($1, $2)`, modelEndpoint, stashID)
+		require.NoError(t, err)
+	}
+}
+
 func seedSharedTagScenes(t *testing.T, pool *pgxpool.Pool, stashIDs ...string) {
 	t.Helper()
 	for _, stashID := range stashIDs {
-		_, err := pool.Exec(context.Background(), `
-			INSERT INTO source_scenes (endpoint, stash_id) VALUES ($1, $2)
-		`, modelEndpoint, stashID)
+		_, err := pool.Exec(context.Background(), `INSERT INTO source_scenes (endpoint, stash_id) VALUES ($1, $2)`, modelEndpoint, stashID)
 		require.NoError(t, err)
 		_, err = pool.Exec(context.Background(), `
 			INSERT INTO source_scene_tags (scene_endpoint, scene_stash_id, tag_endpoint, tag_stash_id)
@@ -305,18 +284,8 @@ func seedSharedTagScenes(t *testing.T, pool *pgxpool.Pool, stashIDs ...string) {
 		`, modelEndpoint, stashID)
 		require.NoError(t, err)
 	}
-	_, err := pool.Exec(context.Background(), `
-		INSERT INTO source_tags (endpoint, stash_id, name) VALUES ($1, 'tag-1', 'Tag')
-	`, modelEndpoint)
+	_, err := pool.Exec(context.Background(), `INSERT INTO source_tags (endpoint, stash_id, name) VALUES ($1, 'tag-1', 'Tag')`, modelEndpoint)
 	require.NoError(t, err)
-}
-
-func seedCatalogedScenes(t *testing.T, pool *pgxpool.Pool, stashIDs ...string) {
-	t.Helper()
-	for _, stashID := range stashIDs {
-		_, err := pool.Exec(context.Background(), `INSERT INTO source_scenes (endpoint, stash_id) VALUES ($1, $2)`, modelEndpoint, stashID)
-		require.NoError(t, err)
-	}
 }
 
 func catalogCandidateReasons(candidates []CatalogCandidate, sourceID, candidateID string) []string {
