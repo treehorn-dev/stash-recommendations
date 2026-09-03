@@ -52,13 +52,30 @@ func GetForYou(reader model.Reader) http.Handler {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		items, version, err := reader.ForYou(r.Context(), account.ID, limit)
+		offset, err := recommendationOffset(r)
+		if err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		items, version, err := reader.ForYou(r.Context(), account.ID, limit, offset)
 		if err != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		writeRecommendations(w, version, items)
 	})
+}
+
+func recommendationOffset(r *http.Request) (int, error) {
+	raw := r.URL.Query().Get("offset")
+	if raw == "" {
+		return 0, nil
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 {
+		return 0, strconv.ErrSyntax
+	}
+	return offset, nil
 }
 
 func recommendationLimit(r *http.Request) (int, error) {

@@ -25,6 +25,12 @@ func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T
 
 	versionID, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
+	var profileCount int
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM model_account_profiles WHERE model_version_id = $1 AND account_id = $2`, versionID, account).Scan(&profileCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, profileCount)
+	_, err = pool.Exec(ctx, `DELETE FROM user_recommendations WHERE model_version_id = $1`, versionID)
+	require.NoError(t, err)
 
 	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("scene-a"), 10)
 	require.NoError(t, err)
@@ -34,12 +40,17 @@ func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T
 	require.Nil(t, items[0].CanonicalURL)
 	require.Nil(t, items[0].PredictedRating)
 
-	forYou, activeVersion, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10)
+	forYou, activeVersion, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10, 0)
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
 	require.Contains(t, recommendationIDs(forYou), "scene-b")
 	require.Contains(t, reasonsFor(forYou, "scene-b"), "rating_profile")
 	require.Contains(t, reasonsFor(forYou, "scene-b"), "play_profile")
+	firstPage, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 1, 0)
+	require.NoError(t, err)
+	secondPage, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 1, 1)
+	require.NoError(t, err)
+	require.NotEqual(t, recommendationIDs(firstPage), recommendationIDs(secondPage))
 }
 
 func TestBuildPersistsBehavioralOnlySessionScene(t *testing.T) {

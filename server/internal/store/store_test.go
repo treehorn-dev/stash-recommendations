@@ -21,6 +21,7 @@ func TestMigrationLedgerIncludesPgvectorRecommendations(t *testing.T) {
 	}
 	require.Contains(t, versions, "009_pgvector_recommendations")
 	require.Contains(t, versions, "010_predicted_ratings")
+	require.Contains(t, versions, "011_model_account_profiles")
 }
 
 func TestMigrateCreatesBaseStorageTables(t *testing.T) {
