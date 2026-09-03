@@ -18,7 +18,6 @@ def test_service_client_uses_explicit_timeout_for_post_and_get(monkeypatch: pyte
         FakeHTTPResponse(202, {"accepted": True}),
         FakeHTTPResponse(200, {"model_version": "model-1", "items": []}),
     ]
-
     def fake_urlopen(http_request: Any, timeout: float) -> FakeHTTPResponse:
         calls.append(
             {
@@ -52,6 +51,19 @@ def test_service_client_uses_explicit_timeout_for_post_and_get(monkeypatch: pyte
             "authorization": "Bearer secret-api-key",
         },
     ]
+
+
+def test_service_client_sends_for_you_offset(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+    monkeypatch.setattr(
+        "rec_plugin.service_client.request.urlopen",
+        lambda http_request, timeout: (seen.append(http_request.full_url), FakeHTTPResponse(200, {"items": []}))[1],
+    )
+    client = ServiceClient(Settings(service_url="https://stashrec.example", api_key="secret", show_remote_results=False))
+
+    client.fetch_for_you(24, offset=48)
+
+    assert seen == ["https://stashrec.example/v1/recommendations/for-you?limit=24&offset=48"]
 
 
 def test_service_client_raises_oserror_when_urlopen_times_out(monkeypatch: pytest.MonkeyPatch) -> None:

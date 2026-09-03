@@ -244,7 +244,7 @@ def test_fetch_for_you_mode_proxies_authenticated_read_without_api_key_markup(
 
     encoded = str(output["output"])
 
-    assert client.for_you_calls == [8]
+    assert client.for_you_calls == [(8, 0)]
     assert output["output"] == {"model_version": "model-2", "items": [recommendation_item("scene-z", 0.5)]}
     assert "secret-api-key" not in encoded
 
@@ -351,15 +351,15 @@ class FakeReadServiceClient:
         self._related = related
         self._for_you = for_you or {"model_version": "", "items": []}
         self.related_calls: list[tuple[list[dict[str, str]], int]] = []
-        self.for_you_calls: list[int] = []
+        self.for_you_calls: list[tuple[int, int]] = []
 
     def fetch_related(self, content_keys: list[dict[str, str]], limit: int) -> dict[str, object]:
         self.related_calls.append((content_keys, limit))
         key = content_keys[0]["endpoint"], content_keys[0]["stash_id"]
         return dict(self._related[key])
 
-    def fetch_for_you(self, limit: int) -> dict[str, object]:
-        self.for_you_calls.append(limit)
+    def fetch_for_you(self, limit: int, *, offset: int = 0) -> dict[str, object]:
+        self.for_you_calls.append((limit, offset))
         return dict(self._for_you)
 
 
