@@ -87,9 +87,9 @@ def _scene_dates(scene: Mapping[str, Any]) -> list[str]:
     dates: list[str] = []
     for field in ("release_date", "production_date", "date"):
         value = scene.get(field)
-        normalized = _normalize_date(value)
-        if normalized is not None and normalized not in dates:
-            dates.append(normalized)
+        iso_date = _iso_date(value)
+        if iso_date is not None and iso_date not in dates:
+            dates.append(iso_date)
     return dates
 
 
@@ -189,13 +189,21 @@ def _parse_timestamp(value: object) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def _normalize_date(value: object) -> str | None:
+def _iso_date(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     if re.fullmatch(r"\d{4}", value):
-        value = f"{value}-01-01"
-    elif re.fullmatch(r"\d{4}-\d{2}", value):
-        value = f"{value}-01"
+        try:
+            date(int(value), 1, 1)
+        except ValueError:
+            return None
+        return value
+    if re.fullmatch(r"\d{4}-\d{2}", value):
+        try:
+            date(int(value[:4]), int(value[5:7]), 1)
+        except ValueError:
+            return None
+        return value
     try:
         date.fromisoformat(value)
     except ValueError:

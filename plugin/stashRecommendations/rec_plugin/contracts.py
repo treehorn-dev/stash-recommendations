@@ -205,12 +205,23 @@ def _validate_https_reference_collection(record: dict[str, Any], index: int, fie
 
 def _validate_date_values(scene: dict[str, Any], index: int) -> None:
     for date_index, value in enumerate(_collection(scene, index, "dates")):
-        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        if not _is_iso8601_date(value):
             raise ValueError(f"scenes[{index}].dates[{date_index}] must be a valid date")
-        try:
+
+
+def _is_iso8601_date(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        if re.fullmatch(r"\d{4}", value):
+            date(int(value), 1, 1)
+        elif re.fullmatch(r"\d{4}-\d{2}", value):
+            date(int(value[:4]), int(value[5:7]), 1)
+        else:
             date.fromisoformat(value)
-        except ValueError as error:
-            raise ValueError(f"scenes[{index}].dates[{date_index}] must be a valid date") from error
+    except ValueError:
+        return False
+    return True
 
 
 def _parse_public_https_url(value: str):

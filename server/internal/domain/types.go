@@ -234,7 +234,7 @@ func (scene *Scene) Validate() error {
 		return fmt.Errorf("duration must not be negative")
 	}
 	for index, date := range scene.Dates {
-		if _, err := time.Parse("2006-01-02", date); err != nil {
+		if !isISO8601Date(date) {
 			return fmt.Errorf("dates[%d] must be a valid date", index)
 		}
 	}
@@ -260,6 +260,17 @@ func (scene *Scene) Validate() error {
 		}
 	}
 	return nil
+}
+
+func isISO8601Date(value string) bool {
+	for _, layout := range []string{"2006", "2006-01", "2006-01-02"} {
+		if len(value) == len(layout) {
+			if _, err := time.Parse(layout, value); err == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (scene *Scene) UnmarshalJSON(data []byte) error {
