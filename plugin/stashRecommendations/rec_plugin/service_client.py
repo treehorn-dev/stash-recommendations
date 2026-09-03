@@ -81,7 +81,10 @@ def _decode_json(response: Any) -> dict[str, Any] | None:
     payload = response.read()
     if not payload.strip():
         return None
-    return json.loads(payload.decode("utf-8"))
+    try:
+        return json.loads(payload.decode("utf-8"))
+    except json.JSONDecodeError:
+        return None
 
 
 def _retry_after_seconds(value: str | None) -> int | None:

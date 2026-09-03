@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import socket
 from typing import Any
@@ -76,6 +77,27 @@ def test_service_client_accepts_whitespace_only_success_response(monkeypatch: py
 
     assert response.status_code == 202
     assert response.body is None
+
+
+def test_service_client_preserves_plaintext_http_error_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_urlopen(http_request: Any, timeout: float) -> FakeHTTPResponse:
+        del http_request, timeout
+        raise error.HTTPError(
+            "https://stashrec.example/v1/catalog/snapshots",
+            400,
+            "Bad Request",
+            {},
+            io.BytesIO(b"bad request\n"),
+        )
+
+    monkeypatch.setattr("rec_plugin.service_client.request.urlopen", fake_urlopen)
+    client = ServiceClient(Settings(service_url="https://stashrec.example", api_key="secret-api-key", show_remote_results=False))
+
+    response = client.deliver_snapshot({"schema_version": 1})
+
+    assert response.status_code == 400
+    assert response.body is None
+    assert response.error == "Bad Request"
 
 
 class FakeHTTPResponse:
