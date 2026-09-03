@@ -303,15 +303,15 @@ test("fetchRelated proxies all content keys through the raw plugin task", async 
   assert.deepEqual(result.items, items);
 });
 
-test("fetchForYou uses the plugin task proxy and limit override", async () => {
+test("fetchForYou uses the plugin task proxy with page offset", async () => {
   const calls = [];
 
-  await fetchForYou(8, async (args) => {
+  await fetchForYou(8, 16, async (args) => {
     calls.push(args);
     return { items: [], model_version: "model-2" };
   });
 
-  assert.deepEqual(calls, [{ mode: "fetch-for-you", limit: 8 }]);
+  assert.deepEqual(calls, [{ mode: "fetch-for-you", limit: 8, offset: 16 }]);
 });
 
 test("plugin UI registers route, nav, scene tab, and never renders a seeded API key", () => {
