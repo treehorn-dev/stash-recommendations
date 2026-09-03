@@ -119,6 +119,7 @@ test("sceneCountRailEntries preserves entity details and splits media by type", 
     o_counter: 3,
     performers: [{ id: "performer-1", name: "Performer A" }, { id: "performer-2", name: "Performer B" }],
     play_count: 7,
+    scene_markers: [{ id: "marker-1", title: "Marker A" }, { id: "marker-2", title: "Marker B" }],
     tags: [{ id: "tag-1", name: "Tag A" }, { id: "tag-2", name: "Tag B" }],
   });
 
@@ -143,6 +144,13 @@ test("sceneCountRailEntries preserves entity details and splits media by type", 
       key: "groups",
       kind: "groups",
       label: "1 group",
+    },
+    {
+      count: 2,
+      items: [{ id: "marker-1", name: "Marker A" }, { id: "marker-2", name: "Marker B" }],
+      key: "markers",
+      kind: "markers",
+      label: "2 markers",
     },
     { count: 7, items: [], key: "plays", kind: "plays", label: "7 plays" },
     { count: 3, items: [], key: "o-count", kind: "o", label: "3 O events" },
@@ -182,7 +190,7 @@ test("sceneCountRailEntries preserves zero-count categories for card presentatio
 
   assert.deepEqual(
     entries.map((entry) => [entry.key, entry.count]),
-    [["performers", 0], ["tags", 0], ["groups", 0], ["plays", 0], ["o-count", 0]]
+    [["performers", 0], ["tags", 0], ["groups", 0], ["markers", 0], ["plays", 0], ["o-count", 0]]
   );
 });
 
@@ -419,6 +427,7 @@ test("For You maps local scenes into the generic entity card surface", () => {
             performers: [{ name: "Performer" }],
             play_count: 3,
             rating100: 90,
+            scene_markers: [{ id: "marker-1", title: "Marker One" }],
             tags: [{ name: "Tag" }],
             title: "Local Scene",
             studio: { id: "studio-1", name: "Studio One" },
@@ -452,6 +461,11 @@ test("For You maps local scenes into the generic entity card surface", () => {
   assert.equal(cards[0].attributes, undefined);
   assert.equal(cards[0].showZeroCounts, false);
   assert.equal(cards[0].countRail.find((entry) => entry.key === "performers").count, "1");
+  assert.equal(cards[0].countRail.find((entry) => entry.key === "groups").icon.props.icon, "film");
+  assert.equal(cards[0].countRail.find((entry) => entry.key === "markers").icon.props.icon, "location-dot");
+  assert.equal(cards[0].countRail.find((entry) => entry.key === "plays").icon.props.icon, "eye");
+  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").icon.type, "span");
+  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").icon.props.children.type, "svg");
   assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").count, "2");
   assert.equal(cards[0].thumbnail.href, "/scenes/44");
   assert.equal(cards[0].thumbnail.previewSrc, "/scene/44/preview");
@@ -505,9 +519,9 @@ function registerUi(state, StashPluginComponents) {
         faFileAudio: "file-audio",
         faFileCode: "file-code",
         faFileVideo: "file-video",
-        faFolder: "folder",
-        faHeart: "heart",
-        faPlay: "play",
+        faEye: "eye",
+        faFilm: "film",
+        faMapMarkerAlt: "location-dot",
         faTag: "tag",
         faUser: "user",
       },
