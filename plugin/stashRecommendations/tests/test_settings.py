@@ -81,6 +81,7 @@ def test_manifest_declares_raw_python_tasks_hook_and_settings() -> None:
     text = manifest.read_text()
 
     assert "interface: raw" in text
+    assert "errLog: info" in text
     assert '  - python3' in text
     assert "service_url:" in text
     assert "api_key:" in text

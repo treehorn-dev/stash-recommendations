@@ -1,11 +1,12 @@
 name: Stash Recommendations
 description: Recommendation sync plugin and local recommendation surfaces for Stash.
-version: "0.1.13"
+version: "0.1.14"
 url: https://github.com/treehorn-dev/stash-recommendations
 exec:
   - python3
   - "{pluginDir}/recommendations.py"
 interface: raw
+errLog: info
 ui:
   javascript:
     - ui/stash-plugin-components.js
