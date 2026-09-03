@@ -166,6 +166,10 @@
     const performers = namedItems(scene.performers);
     const tags = namedItems(scene.tags);
     const groups = namedItems((Array.isArray(scene.groups) ? scene.groups : []).map((entry) => entry?.group));
+    const markers = namedItems((Array.isArray(scene.scene_markers) ? scene.scene_markers : []).map((marker) => ({
+      id: marker?.id,
+      name: marker?.title || "Scene marker",
+    })));
     const filesByType = new Map();
     for (const file of Array.isArray(scene.files) ? scene.files : []) {
       const kind = file?.video_codec ? "video" : file?.audio_codec ? "audio" : "file";
@@ -177,6 +181,7 @@
       { count: performers.length, items: performers, key: "performers", kind: "performers", label: countLabel(performers.length, "performer") },
       { count: tags.length, items: tags, key: "tags", kind: "tags", label: countLabel(tags.length, "tag") },
       { count: groups.length, items: groups, key: "groups", kind: "groups", label: countLabel(groups.length, "group") },
+      { count: markers.length, items: markers, key: "markers", kind: "markers", label: countLabel(markers.length, "marker") },
       { count: Number(scene.play_count || 0), items: [], key: "plays", kind: "plays", label: countLabel(Number(scene.play_count || 0), "play") },
       { count: Number(scene.o_counter || 0), items: [], key: "o-count", kind: "o", label: countLabel(Number(scene.o_counter || 0), "O event") },
       ...[...filesByType.entries()].map(([kind, files]) => ({
@@ -229,9 +234,9 @@
       faFileAudio,
       faFileCode,
       faFileVideo,
-      faFolder,
-      faHeart,
-      faPlay,
+      faEye,
+      faFilm,
+      faMapMarkerAlt,
       faTag,
       faUser,
     } = PluginApi.libraries.FontAwesomeSolid;
@@ -278,6 +283,10 @@
             interactive_speed
             play_history
             o_history
+            scene_markers {
+              id
+              title
+            }
             paths {
               screenshot
               preview
@@ -321,13 +330,39 @@
       audio: faFileAudio,
       file: faFile,
       funscript: faFileCode,
-      groups: faFolder,
-      o: faHeart,
+      groups: faFilm,
+      markers: faMapMarkerAlt,
       performers: faUser,
-      plays: faPlay,
+      plays: faEye,
       tags: faTag,
       video: faFileVideo,
     };
+
+    function SweatDropsIcon() {
+      return React.createElement(
+        "span",
+        null,
+        React.createElement(
+          "svg",
+          {
+            "aria-hidden": "true",
+            focusable: "false",
+            height: "1em",
+            preserveAspectRatio: "xMidYMid meet",
+            style: { transform: "rotate(360deg)" },
+            viewBox: "0 0 36 36",
+            width: "1em",
+            xmlns: "http://www.w3.org/2000/svg",
+            xmlnsXlink: "http://www.w3.org/1999/xlink",
+          },
+          React.createElement("path", {
+            d: "M22.855.758L7.875 7.024l12.537 9.733c2.633 2.224 6.377 2.937 9.77 1.518c4.826-2.018 7.096-7.576 5.072-12.413C33.232 1.024 27.68-1.261 22.855.758zm-9.962 17.924L2.05 10.284L.137 23.529a7.993 7.993 0 0 0 2.958 7.803a8.001 8.001 0 0 0 9.798-12.65zm15.339 7.015l-8.156-4.69l-.033 9.223c-.088 2 .904 3.98 2.75 5.041a5.462 5.462 0 0 0 7.479-2.051c1.499-2.644.589-6.013-2.04-7.523z",
+            fill: "currentColor",
+          }),
+          React.createElement("rect", { fill: "rgba(0, 0, 0, 0)", height: "36", width: "36", x: "0", y: "0" })
+        )
+      );
+    }
 
     function countRailContent(entry) {
       if (entry.items.length === 0) {
@@ -355,7 +390,9 @@
       return entries.map((entry) => ({
         content: countRailContent(entry),
         count: String(entry.count),
-        icon: React.createElement(FontAwesomeIcon, { fixedWidth: true, icon: countIcons[entry.kind] || faFile }),
+        icon: entry.kind === "o"
+          ? React.createElement(SweatDropsIcon)
+          : React.createElement(FontAwesomeIcon, { fixedWidth: true, icon: countIcons[entry.kind] || faFile }),
         key: entry.key,
         label: entry.label,
       }));
