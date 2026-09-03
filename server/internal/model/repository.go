@@ -509,6 +509,15 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 		return nil, "", fmt.Errorf("iterate recommendations: %w", err)
 	}
 
+	keys := make([]domain.ContentKey, 0, len(raw))
+	for _, row := range raw {
+		keys = append(keys, row.key)
+	}
+	templates, err := repository.canonicalURLs(ctx, keys)
+	if err != nil {
+		return nil, "", err
+	}
+
 	version := fmt.Sprint(arguments[0])
 	items := make([]Recommendation, 0, len(raw))
 	for _, row := range raw {
@@ -516,10 +525,7 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 		if err := json.Unmarshal(row.reasons, &reasons); err != nil {
 			return nil, "", fmt.Errorf("decode recommendation reasons: %w", err)
 		}
-		canonicalURL, err := repository.canonicalURL(ctx, row.key)
-		if err != nil {
-			return nil, "", err
-		}
+		canonicalURL := canonicalURL(templates[row.key.Endpoint], row.key.StashID)
 		if row.predictedRating != nil {
 			fivePoint := *row.predictedRating * 5
 			row.predictedRating = &fivePoint
@@ -529,21 +535,53 @@ func (repository *Repository) readRecommendations(ctx context.Context, query str
 	return items, version, nil
 }
 
-func (repository *Repository) canonicalURL(ctx context.Context, key domain.ContentKey) (*string, error) {
-	var template *string
-	err := repository.pool.QueryRow(ctx, `SELECT canonical_scene_url_template FROM source_configs WHERE endpoint = $1`, key.Endpoint).Scan(&template)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+func (repository *Repository) canonicalURLs(ctx context.Context, keys []domain.ContentKey) (map[string]string, error) {
+	endpoints := make([]string, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if _, exists := seen[key.Endpoint]; exists {
+			continue
 		}
-		return nil, fmt.Errorf("query canonical URL: %w", err)
+		seen[key.Endpoint] = struct{}{}
+		endpoints = append(endpoints, key.Endpoint)
 	}
-	if template == nil || strings.TrimSpace(*template) == "" {
-		return nil, nil
+	if len(endpoints) == 0 {
+		return map[string]string{}, nil
 	}
-	value := strings.ReplaceAll(*template, "{stash_id}", key.StashID)
-	value = strings.ReplaceAll(value, "{id}", key.StashID)
-	return &value, nil
+
+	rows, err := repository.pool.Query(ctx, `
+		SELECT endpoint, canonical_scene_url_template
+		FROM source_configs
+		WHERE endpoint = ANY($1)
+			AND canonical_scene_url_template IS NOT NULL
+			AND btrim(canonical_scene_url_template) <> ''
+	`, endpoints)
+	if err != nil {
+		return nil, fmt.Errorf("query canonical URLs: %w", err)
+	}
+	defer rows.Close()
+
+	templates := make(map[string]string, len(endpoints))
+	for rows.Next() {
+		var endpoint, template string
+		if err := rows.Scan(&endpoint, &template); err != nil {
+			return nil, fmt.Errorf("scan canonical URL: %w", err)
+		}
+		templates[endpoint] = template
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate canonical URLs: %w", err)
+	}
+	return templates, nil
+}
+
+func canonicalURL(template, stashID string) *string {
+	if strings.TrimSpace(template) == "" {
+		return nil
+	}
+	value := strings.ReplaceAll(template, "{stash_id}", stashID)
+	value = strings.ReplaceAll(value, "{id}", stashID)
+	return &value
 }
 
 func normalizeLimit(limit int) int {
