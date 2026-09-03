@@ -227,6 +227,13 @@ func TestUppercaseEndpointFixtureNormalizes(t *testing.T) {
 	require.Equal(t, "https://box.example/GRAPHQL", event.ContentKey.Endpoint)
 }
 
+func TestSceneAcceptsReducedPrecisionISO8601Dates(t *testing.T) {
+	for _, value := range []string{"2006", "2007-04", "2008-02-03"} {
+		scene := Scene{ID: "scene-1", Dates: []string{value}}
+		require.NoError(t, scene.Validate(), value)
+	}
+}
+
 func v1FixturePath(t *testing.T, name string) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)

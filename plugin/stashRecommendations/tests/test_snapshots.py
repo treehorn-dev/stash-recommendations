@@ -153,7 +153,7 @@ def test_to_source_snapshot_drops_invalid_optional_urls_and_dates() -> None:
     }
 
 
-def test_to_source_snapshot_normalizes_partial_source_dates_to_the_first_day() -> None:
+def test_to_source_snapshot_preserves_reduced_precision_iso_dates() -> None:
     snapshot = to_source_snapshot(
         "https://box.example/graphql",
         CAPTURED_AT,
@@ -168,7 +168,7 @@ def test_to_source_snapshot_normalizes_partial_source_dates_to_the_first_day() -
     )
 
     assert snapshot.to_dict()["scenes"][0]["dates"] == [
-        "2006-01-01",
-        "2007-04-01",
+        "2006",
+        "2007-04",
         "2008-02-03",
     ]
