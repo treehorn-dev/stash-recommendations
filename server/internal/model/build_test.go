@@ -93,6 +93,33 @@ func TestForYouIncludesPredictedRatingForSufficientRatingHistory(t *testing.T) {
 	t.Fatal("expected candidate recommendation")
 }
 
+func TestCanonicalURLsResolvesDistinctEndpointTemplatesInOneSet(t *testing.T) {
+	repository, pool := openModelTestStore(t)
+	ctx := context.Background()
+
+	firstEndpoint := "https://first.example/graphql"
+	secondEndpoint := "https://second.example/graphql"
+	_, err := pool.Exec(ctx, `
+		INSERT INTO source_configs (endpoint, canonical_scene_url_template) VALUES
+			($1, 'https://first.example/scenes/{stash_id}'),
+			($2, 'https://second.example/watch/{id}')
+	`, firstEndpoint, secondEndpoint)
+	require.NoError(t, err)
+
+	keys := []domain.ContentKey{
+		{Endpoint: firstEndpoint, StashID: "first-scene"},
+		{Endpoint: firstEndpoint, StashID: "another-first-scene"},
+		{Endpoint: secondEndpoint, StashID: "second-scene"},
+		{Endpoint: "https://unconfigured.example/graphql", StashID: "missing-scene"},
+	}
+	urls, err := NewRepository(repository.Pool()).canonicalURLs(ctx, keys)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{
+		firstEndpoint:  "https://first.example/scenes/{stash_id}",
+		secondEndpoint: "https://second.example/watch/{id}",
+	}, urls)
+}
+
 func TestCatalogCandidatesIncludeValidatedSceneAttributes(t *testing.T) {
 	repository, pool := openModelTestStore(t)
 	ctx := context.Background()
