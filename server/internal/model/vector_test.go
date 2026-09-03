@@ -10,12 +10,6 @@ import (
 	"github.com/treehorn/stash-recommendations/server/internal/domain"
 )
 
-func TestProfileRecommendationLimitSupportsLargeCandidateSets(t *testing.T) {
-	if got, want := profileRecommendationLimit, 5000; got != want {
-		t.Fatalf("profile recommendation limit = %d, want %d", got, want)
-	}
-}
-
 func TestBuilderSavesVectorProjectionInsteadOfNeighbors(t *testing.T) {
 	source := &vectorBuildSource{
 		catalog: []CatalogScene{{

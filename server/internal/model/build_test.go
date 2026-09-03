@@ -29,8 +29,10 @@ func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T
 	err = pool.QueryRow(ctx, `SELECT count(*) FROM model_account_profiles WHERE model_version_id = $1 AND account_id = $2`, versionID, account).Scan(&profileCount)
 	require.NoError(t, err)
 	require.Equal(t, 1, profileCount)
-	_, err = pool.Exec(ctx, `DELETE FROM user_recommendations WHERE model_version_id = $1`, versionID)
+	var materializedRecommendationCount int
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM user_recommendations WHERE model_version_id = $1`, versionID).Scan(&materializedRecommendationCount)
 	require.NoError(t, err)
+	require.Zero(t, materializedRecommendationCount)
 
 	items, activeVersion, err := NewRepository(repository.Pool()).Related(ctx, account, contentKey("scene-a"), 10)
 	require.NoError(t, err)
