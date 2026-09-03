@@ -28,6 +28,11 @@
     return Math.floor(lastRequiredItem / batchSize) * batchSize;
   }
 
+  function shouldFetchAnotherForYouBatch({ batchSize = 100, receivedCount, visibleCount }) {
+    // Fetch enough resolved entries for the largest supported page plus its continuation.
+    return Number(receivedCount) >= Number(batchSize) && Number(visibleCount) < 49;
+  }
+
   function resolveLocalRecommendations(items, findScenes, showRemote) {
     return (Array.isArray(items) ? items : []).flatMap((item) => {
       const scenes = findScenes(item) || [];
@@ -739,6 +744,8 @@
         items: [],
         loading: true,
         modelVersion: "",
+        nextServerOffset: null,
+        hasMoreServerBatches: false,
         status: null,
       });
 
@@ -752,6 +759,8 @@
                 items: [],
                 loading: true,
                 modelVersion: "",
+                nextServerOffset: null,
+                hasMoreServerBatches: false,
                 status: null,
               });
           try {
@@ -779,13 +788,27 @@
               });
               return;
             }
-            const response = await loader(status);
-            const localMatches = await loadLocalSceneMatches(response.items);
-            const resolved = resolveLocalRecommendations(
-              response.items,
-              (item) => localMatches[keyFor(item.content_key)] || [],
-              Boolean(status.settings?.show_remote_results)
-            );
+            let relativeOffset = 0;
+            let response = await loader(status, relativeOffset);
+            let resolved = [];
+            let receivedCount = 0;
+            do {
+              receivedCount = Array.isArray(response.items) ? response.items.length : 0;
+              const localMatches = await loadLocalSceneMatches(response.items);
+              resolved = resolved.concat(resolveLocalRecommendations(
+                response.items,
+                (item) => localMatches[keyFor(item.content_key)] || [],
+                Boolean(status.settings?.show_remote_results)
+              ));
+              relativeOffset += receivedCount;
+              if (!options.fetchMore || !options.fetchMore({
+                receivedCount,
+                visibleCount: resolved.length,
+              })) {
+                break;
+              }
+              response = await loader(status, relativeOffset);
+            } while (active);
             if (!active) {
               return;
             }
@@ -794,6 +817,8 @@
               items: options.append ? [...previous.items, ...resolved] : resolved,
               loading: false,
               modelVersion: response.model_version,
+              nextServerOffset: options.nextServerOffset ? options.nextServerOffset(relativeOffset) : null,
+              hasMoreServerBatches: options.fetchMore && receivedCount >= 100,
               status,
             }));
           } catch (error) {
@@ -819,7 +844,11 @@
     }
 
     function RecommendationPanel(props) {
-      const state = useRecommendationState(props.loader, props.dependency, { append: props.append });
+      const state = useRecommendationState(props.loader, props.dependency, {
+        append: props.append,
+        fetchMore: props.fetchMore,
+        nextServerOffset: props.nextServerOffset,
+      });
       const [sectionControls, setSectionControls] = React.useState({});
 
       if (state.loading) {
@@ -876,11 +905,11 @@
         return {
           onPageChange: (page) => {
             update({ page });
-            props.onSectionPageChange?.(name, page, current.pageSize ?? 24);
+            props.onSectionPageChange?.(name, page, current.pageSize ?? 24, state);
           },
           onPageSizeChange: (pageSize) => {
             update({ page: 1, pageSize });
-            props.onSectionPageChange?.(name, 1, pageSize);
+            props.onSectionPageChange?.(name, 1, pageSize, state);
           },
           onSortChange: (sort) => update({ page: 1, sort }),
           page: current.page ?? 1,
@@ -935,14 +964,20 @@
       return React.createElement(RecommendationPanel, {
         append: loadedOffset > 0,
         dependency: `for-you:${loadedOffset}`,
-        loader: function () {
-          return fetchForYou(100, loadedOffset, runPluginOperation);
+        fetchMore: shouldFetchAnotherForYouBatch,
+        loader: function (_status, relativeOffset = 0) {
+          return fetchForYou(100, loadedOffset + relativeOffset, runPluginOperation);
         },
-        onSectionPageChange: function (section, page, pageSize) {
+        nextServerOffset: function (relativeOffset) {
+          return loadedOffset + relativeOffset;
+        },
+        onSectionPageChange: function (section, page, pageSize, state) {
           if (section !== "local") {
             return;
           }
-          setLoadedOffset((current) => Math.max(current, forYouOffsetForPage(page, pageSize)));
+          if (state.hasMoreServerBatches && page * pageSize >= state.items.length && Number.isFinite(state.nextServerOffset)) {
+            setLoadedOffset((current) => Math.max(current, state.nextServerOffset));
+          }
         },
         title: "For You",
         combineLocalSections: true,
@@ -1033,5 +1068,6 @@
     register,
     resolveLocalRecommendations,
     sceneCountRailEntries,
+    shouldFetchAnotherForYouBatch,
   };
 });

@@ -22,6 +22,7 @@ const {
   forYouOffsetForPage,
   partitionRecommendations,
   resolveLocalRecommendations,
+  shouldFetchAnotherForYouBatch,
 } = require(modulePath);
 
 test("formatRecommendationReasons turns model reason codes into one user-facing explanation", () => {
@@ -321,6 +322,21 @@ test("forYouOffsetForPage loads the next server batch only after the current bat
   assert.equal(forYouOffsetForPage(5, 24), 100);
   assert.equal(forYouOffsetForPage(3, 48), 100);
   assert.equal(forYouOffsetForPage(9, 24), 200);
+});
+
+test("For You keeps consuming complete server batches until a visible page can continue", () => {
+  assert.equal(
+    shouldFetchAnotherForYouBatch({ batchSize: 100, receivedCount: 100, visibleCount: 24 }),
+    true
+  );
+  assert.equal(
+    shouldFetchAnotherForYouBatch({ batchSize: 100, receivedCount: 100, visibleCount: 49 }),
+    false
+  );
+  assert.equal(
+    shouldFetchAnotherForYouBatch({ batchSize: 100, receivedCount: 37, visibleCount: 3 }),
+    false
+  );
 });
 
 test("plugin UI registers route, nav, scene tab, and never renders a seeded API key", () => {
