@@ -59,6 +59,44 @@
   border-style: dashed;
 }
 
+.stash-recommendations__entity-card--remote {
+  border-style: dashed;
+}
+
+.stash-recommendations__entity-title {
+  color: inherit;
+  text-decoration: none;
+}
+
+.stash-recommendations__entity-title:hover {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.stash-recommendations__heatmap {
+  height: 100%;
+  object-fit: fill;
+  opacity: 0.75;
+  width: 100%;
+}
+
+.stash-recommendations__status {
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+}
+
+.stash-recommendations__status--unwatched {
+  background: rgba(211, 158, 0, 0.18);
+  color: var(--bs-warning, #d39e00);
+}
+
+.stash-recommendations__status--remote {
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+}
+
 .stash-recommendations__card-title {
   font-weight: 600;
 }

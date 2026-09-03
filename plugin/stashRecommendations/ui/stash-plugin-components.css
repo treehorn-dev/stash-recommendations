@@ -157,6 +157,91 @@
   color: var(--bs-secondary-color, rgba(255, 255, 255, 0.7));
 }
 
+.stash-composables-entity-card {
+  background: var(--stash-composables-entity-card-background, var(--card-bg, #1d2124));
+  border: 1px solid var(--stash-composables-entity-card-border, var(--bs-border-color, rgba(255, 255, 255, 0.15)));
+  border-radius: 0.5rem;
+  color: var(--stash-composables-entity-card-text, inherit);
+  display: grid;
+  gap: 0.75rem;
+  overflow: hidden;
+  padding: 0.75rem;
+  text-decoration: none;
+}
+
+.stash-composables-entity-card:hover {
+  color: var(--stash-composables-entity-card-text, inherit);
+  text-decoration: none;
+}
+
+.stash-composables-entity-card__header,
+.stash-composables-entity-card__footer,
+.stash-composables-entity-card__attribute {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.stash-composables-entity-card__media {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  position: relative;
+}
+
+.stash-composables-entity-card__thumbnail {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.stash-composables-entity-card__media > :not(.stash-composables-entity-card__thumbnail) {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.stash-composables-entity-card__body {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.stash-composables-entity-card__title {
+  font-weight: 600;
+}
+
+.stash-composables-entity-card__description,
+.stash-composables-entity-card__attributes {
+  color: var(--bs-secondary-color, rgba(255, 255, 255, 0.7));
+  font-size: 0.875rem;
+}
+
+.stash-composables-entity-card__attributes {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.stash-composables-entity-card__attribute dt,
+.stash-composables-entity-card__attribute dd {
+  margin: 0;
+}
+
+.stash-composables-entity-card__attribute dt {
+  color: inherit;
+  font-weight: 600;
+}
+
+.stash-composables-entity-card__footer {
+  border-top: 1px solid var(--bs-border-color, rgba(255, 255, 255, 0.15));
+  padding-top: 0.5rem;
+}
+
+.stash-composables-entity-card__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .stash-composables-ranked-actions,
 .stash-composables-ranked-controls,
 .stash-composables-ranked-controls__paging {
