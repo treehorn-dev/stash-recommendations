@@ -23,14 +23,14 @@ def load_builder():
 
 def test_remote_package_catalog_matches_distributable_archive(tmp_path: Path) -> None:
     archive_path, index_path = load_builder().build(
-        "0.1.18", tmp_path, load_builder().datetime(2026, 9, 3, tzinfo=load_builder().timezone.utc)
+        "0.1.19", tmp_path, load_builder().datetime(2026, 9, 3, tzinfo=load_builder().timezone.utc)
     )
     packages = yaml.safe_load(index_path.read_text())
 
     assert len(packages) == 1
     package = packages[0]
     assert package["id"] == "stashRecommendations"
-    assert package["path"].endswith("/releases/download/v0.1.18/stashRecommendations-0.1.18.zip")
+    assert package["path"].endswith("/releases/download/v0.1.19/stashRecommendations-0.1.19.zip")
     assert package["sha256"] == load_builder().hashlib.sha256(archive_path.read_bytes()).hexdigest()
 
     with zipfile.ZipFile(archive_path) as archive:
@@ -43,6 +43,6 @@ def test_remote_package_catalog_matches_distributable_archive(tmp_path: Path) ->
     assert "ui/stash-plugin-components.js" in names
     assert "ui/stash-plugin-components.css" in names
     assert "rec_plugin/settings.py" in names
-    assert manifest["version"] == "0.1.18"
+    assert manifest["version"] == "0.1.19"
     assert manifest["ui"]["javascript"][0] == "ui/stash-plugin-components.js"
     assert manifest["ui"]["css"][0] == "ui/stash-plugin-components.css"
