@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Iterable, Mapping
+from urllib.parse import urlparse
 
 from rec_plugin.contracts import ContentKey, SourceSnapshot
 
@@ -20,7 +21,7 @@ def to_source_snapshot(endpoint: str, captured_at: datetime, scene: Mapping[str,
     dates = _scene_dates(scene)
     if dates:
         mapped_scene["dates"] = dates
-    urls = _string_values(scene.get("urls"))
+    urls = _https_reference_values(scene.get("urls"))
     if urls:
         mapped_scene["urls"] = urls
     duration = scene.get("duration")
@@ -35,7 +36,7 @@ def to_source_snapshot(endpoint: str, captured_at: datetime, scene: Mapping[str,
     groups = _groups(scene.get("groups"))
     if groups:
         mapped_scene["groups"] = groups
-    remote_images = _image_urls(scene.get("images")) or _string_values(scene.get("remote_images"))
+    remote_images = _image_urls(scene.get("images")) or _https_reference_values(scene.get("remote_images"))
     if remote_images:
         mapped_scene["remote_images"] = remote_images
     performer_ids = [{"performer_id": performer["id"]} for performer in mapped_performers]
@@ -72,10 +73,10 @@ def _map_performer(appearance: Mapping[str, Any]) -> dict[str, Any]:
     career_years = _career_years(performer)
     if career_years:
         mapped["career_years"] = career_years
-    urls = _string_values(performer.get("urls"))
+    urls = _https_reference_values(performer.get("urls"))
     if urls:
         mapped["urls"] = urls
-    remote_images = _image_urls(performer.get("images")) or _string_values(performer.get("remote_images"))
+    remote_images = _image_urls(performer.get("images")) or _https_reference_values(performer.get("remote_images"))
     if remote_images:
         mapped["remote_images"] = remote_images
     return mapped
@@ -85,7 +86,7 @@ def _scene_dates(scene: Mapping[str, Any]) -> list[str]:
     dates: list[str] = []
     for field in ("release_date", "production_date", "date"):
         value = scene.get(field)
-        if isinstance(value, str) and value and value not in dates:
+        if isinstance(value, str) and _is_valid_date(value) and value not in dates:
             dates.append(value)
     return dates
 
@@ -167,7 +168,11 @@ def _string_values(values: object) -> list[str]:
 
 
 def _image_urls(values: object) -> list[str]:
-    return _string_values(values)
+    return _https_reference_values(values)
+
+
+def _https_reference_values(values: object) -> list[str]:
+    return [value for value in _string_values(values) if _is_public_https_url(value)]
 
 
 def _copy_string(source: Mapping[str, Any], target: dict[str, Any], field: str) -> None:
@@ -180,3 +185,28 @@ def _parse_timestamp(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _is_valid_date(value: str) -> bool:
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_public_https_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        username = parsed.username
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() == "https"
+        and bool(parsed.netloc)
+        and username is None
+        and not parsed.query
+        and not parsed.fragment
+        and "?" not in value
+        and "#" not in value
+    )

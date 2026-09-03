@@ -106,3 +106,48 @@ def test_to_source_snapshot_requires_source_updated_at() -> None:
                 "performers": [],
             },
         )
+
+
+def test_to_source_snapshot_drops_invalid_optional_urls_and_dates() -> None:
+    snapshot = to_source_snapshot(
+        "https://box.example/graphql",
+        CAPTURED_AT,
+        {
+            "id": "scene-1",
+            "updated": "2026-08-31T00:00:00Z",
+            "release_date": "not-a-date",
+            "urls": ["http://example.test/scene", "https://example.test/scene"],
+            "images": [{"url": "https://images.example/scene.jpg?tracking=1"}],
+            "performers": [
+                {
+                    "performer": {
+                        "id": "performer-1",
+                        "name": "Performer",
+                        "urls": ["ftp://example.test/profile", "https://example.test/profile"],
+                        "images": [{"url": "https://images.example/performer.jpg#fragment"}],
+                    }
+                }
+            ],
+        },
+    )
+
+    assert snapshot.to_dict() == {
+        "schema_version": 1,
+        "content_key": {"endpoint": "https://box.example/graphql", "stash_id": "scene-1"},
+        "captured_at": "2026-08-30T12:00:00Z",
+        "source_updated_at": "2026-08-31T00:00:00Z",
+        "scenes": [
+            {
+                "id": "scene-1",
+                "urls": ["https://example.test/scene"],
+                "performer_appearances": [{"performer_id": "performer-1"}],
+            }
+        ],
+        "performers": [
+            {
+                "id": "performer-1",
+                "name": "Performer",
+                "urls": ["https://example.test/profile"],
+            }
+        ],
+    }
