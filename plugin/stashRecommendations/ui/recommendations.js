@@ -16,11 +16,44 @@
     }).then(normalizeRecommendationResponse);
   }
 
-  function fetchForYou(limit, offset, runPluginOperation) {
+  const FOR_YOU_NUMERIC_OPERATORS = ["gt", "gte", "lt", "lte", "eq", "is_null", "not_null"];
+  const NULL_NUMERIC_OPERATORS = new Set(["is_null", "not_null"]);
+
+  function normalizeForYouFilters(filters) {
+    const normalized = {};
+    for (const key of ["rating", "o_count"]) {
+      const predicate = filters?.[key];
+      if (!FOR_YOU_NUMERIC_OPERATORS.includes(predicate?.operator)) {
+        continue;
+      }
+      if (NULL_NUMERIC_OPERATORS.has(predicate.operator)) {
+        normalized[key] = { operator: predicate.operator };
+        continue;
+      }
+      if (Number.isFinite(predicate.value)) {
+        normalized[key] = { operator: predicate.operator, value: predicate.value };
+      }
+    }
+    return normalized;
+  }
+
+  function forYouFilterFields(filters) {
+    return [
+      { key: "rating", label: "Rating", operators: FOR_YOU_NUMERIC_OPERATORS, value: filters?.rating },
+      { key: "o_count", label: "O count", operators: FOR_YOU_NUMERIC_OPERATORS, value: filters?.o_count },
+    ];
+  }
+
+  function forYouFiltersKey(filters) {
+    return JSON.stringify(normalizeForYouFilters(filters));
+  }
+
+  function fetchForYou(limit, offset, runPluginOperation, filters) {
     return runPluginOperation({
       mode: "fetch-for-you",
       limit,
       offset,
+      filters: normalizeForYouFilters(filters),
     }).then(normalizeRecommendationResponse);
   }
 
@@ -730,6 +763,7 @@
             pageSize: controls.pageSize,
             pageSizeOptions: [12, 24, 48],
           },
+          filters: controls.numericFilters,
           sort: {
             compare: controls.sort === "title-asc"
               ? (left, right) => recommendationTitle(left.item).localeCompare(recommendationTitle(right.item))
@@ -961,6 +995,7 @@
             props.onSectionPageChange?.(name, 1, pageSize, state);
           },
           onSortChange: (sort) => update({ page: 1, sort }),
+          numericFilters: name === props.filterSection ? props.numericFilters : undefined,
           page: current.page ?? 1,
           pageSize: current.pageSize ?? 24,
           sort: current.sort ?? "score",
@@ -1010,12 +1045,22 @@
 
     function ForYouPage() {
       const [loadedOffset, setLoadedOffset] = React.useState(0);
+      const [filters, setFilters] = React.useState({});
+      const filterKey = forYouFiltersKey(filters);
       return React.createElement(RecommendationPanel, {
         append: loadedOffset > 0,
-        dependency: `for-you:${loadedOffset}`,
+        dependency: `for-you:${loadedOffset}:${filterKey}`,
+        filterSection: "local",
+        numericFilters: {
+          fields: forYouFilterFields(filters),
+          onChange: (key, value) => {
+            setLoadedOffset(0);
+            setFilters((previous) => ({ ...previous, [key]: value }));
+          },
+        },
         fetchMore: shouldFetchAnotherForYouBatch,
         loader: function (_status, relativeOffset = 0) {
-          return fetchForYou(100, loadedOffset + relativeOffset, runPluginOperation);
+          return fetchForYou(100, loadedOffset + relativeOffset, runPluginOperation, filters);
         },
         nextServerOffset: function (relativeOffset) {
           return loadedOffset + relativeOffset;
@@ -1109,6 +1154,8 @@
   return {
     describeLocalScene,
     fetchForYou,
+    forYouFilterFields,
+    forYouFiltersKey,
     fetchRelated,
     forYouOffsetForPage,
     formatRecommendationReasons,

@@ -550,18 +550,73 @@ function paginateRankedItems(items, options = {}) {
 
 
 
-function renderRankedControls(React, sort, pagination, page) {
-  const sortOptions = Array.isArray(sort?.options) ? sort.options : [];
-  const pageSizeOptions = Array.isArray(pagination?.pageSizeOptions)
-    ? pagination.pageSizeOptions
-    : [];
-  if (!sortOptions.length && !pagination) {
+const defaultNumericOperators = ["gt", "gte", "lt", "lte", "eq", "is_null", "not_null"];
+const nullOperators = new Set(["is_null", "not_null"]);
+
+function numericOperatorOptions(field) {
+  return Array.isArray(field.operators) && field.operators.length
+    ? field.operators
+    : defaultNumericOperators;
+}
+
+function renderNumericFilterField(React, field, onChange) {
+  const value = field.value ?? {};
+  const operator = value.operator ?? "gte";
+  const controls = [
+    React.createElement("label", null, field.label),
+    React.createElement(
+      "select",
+      {
+        value: operator,
+        onChange: (event) => onChange?.(field.key, { ...value, operator: event.target.value }),
+      },
+      ...numericOperatorOptions(field).map((operatorValue) => React.createElement(
+        "option",
+        { key: operatorValue, value: operatorValue },
+        operatorValue
+      ))
+    ),
+  ];
+
+  if (!nullOperators.has(operator)) {
+    controls.push(React.createElement("input", {
+      type: "number",
+      value: String(value.value ?? ""),
+      onChange: (event) => onChange?.(field.key, {
+        ...value,
+        value: Number(event.target.value),
+      }),
+    }));
+  }
+
+  return React.createElement("div", { key: field.key }, ...controls);
+}
+
+function renderNumericFilters(React, filters) {
+  const fields = Array.isArray(filters?.fields) ? filters.fields : [];
+  if (!fields.length) {
     return null;
   }
 
   return React.createElement(
     "div",
-    { className: "stash-composables-ranked-controls" },
+    { className: "stash-composables-ranked-controls__filters" },
+    ...fields.map((field) => renderNumericFilterField(React, field, filters.onChange))
+  );
+}
+
+function renderRankedControls(React, sort, pagination, page, filters) {
+  const sortOptions = Array.isArray(sort?.options) ? sort.options : [];
+  const pageSizeOptions = Array.isArray(pagination?.pageSizeOptions)
+    ? pagination.pageSizeOptions
+    : [];
+  const numericFilters = renderNumericFilters(React, filters);
+  if (!sortOptions.length && !pagination && !numericFilters) {
+    return null;
+  }
+
+  const controls = [
+    numericFilters,
     sortOptions.length
       ? React.createElement(
           "select",
@@ -619,6 +674,12 @@ function renderRankedControls(React, sort, pagination, page) {
           ))
         )
       : null
+  ].filter(Boolean);
+
+  return React.createElement(
+    "div",
+    { className: "stash-composables-ranked-controls" },
+    ...controls
   );
 }
 
@@ -627,7 +688,7 @@ function renderRankedCollectionSurface(runtime, props = {}) {
   const filtered = filterRankedItems(resolved, props.filterRecord);
   const sorted = sortRankedItems(filtered, props.sort?.compare);
   const page = paginateRankedItems(sorted, props.pagination);
-  const controls = renderRankedControls(runtime.React, props.sort, props.pagination, page);
+  const controls = renderRankedControls(runtime.React, props.sort, props.pagination, page, props.filters);
 
   return renderCollectionSurface(runtime, {
     ...props,

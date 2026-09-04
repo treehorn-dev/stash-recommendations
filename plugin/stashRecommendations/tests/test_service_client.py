@@ -53,7 +53,7 @@ def test_service_client_uses_explicit_timeout_for_post_and_get(monkeypatch: pyte
     ]
 
 
-def test_service_client_sends_for_you_offset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_client_sends_for_you_offset_and_numeric_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
     monkeypatch.setattr(
         "rec_plugin.service_client.request.urlopen",
@@ -61,9 +61,19 @@ def test_service_client_sends_for_you_offset(monkeypatch: pytest.MonkeyPatch) ->
     )
     client = ServiceClient(Settings(service_url="https://stashrec.example", api_key="secret", show_remote_results=False))
 
-    client.fetch_for_you(24, offset=48)
+    client.fetch_for_you(
+        24,
+        offset=48,
+        filters={
+            "rating": {"operator": "gte", "value": 4},
+            "o_count": {"operator": "not_null"},
+        },
+    )
 
-    assert seen == ["https://stashrec.example/v1/recommendations/for-you?limit=24&offset=48"]
+    assert seen == [
+        "https://stashrec.example/v1/recommendations/for-you?limit=24&offset=48"
+        "&rating_operator=gte&rating_value=4&o_count_operator=not_null"
+    ]
 
 
 def test_service_client_raises_oserror_when_urlopen_times_out(monkeypatch: pytest.MonkeyPatch) -> None:

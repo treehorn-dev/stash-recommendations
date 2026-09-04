@@ -18,6 +18,8 @@ const {
   sceneCountRailEntries,
   recommendationBadgeCells,
   fetchForYou,
+  forYouFilterFields,
+  forYouFiltersKey,
   fetchRelated,
   forYouOffsetForPage,
   indexLocalSceneMatches,
@@ -354,15 +356,49 @@ test("fetchRelated proxies all content keys through the raw plugin task", async 
   assert.deepEqual(result.items, items);
 });
 
-test("fetchForYou forwards the requested limit and offset through the plugin task proxy", async () => {
+test("fetchForYou forwards numeric filters through the plugin task proxy", async () => {
   const calls = [];
 
   await fetchForYou(8, 16, async (args) => {
     calls.push(args);
     return { items: [], model_version: "model-2" };
+  }, {
+    rating: { operator: "gte", value: 4 },
+    o_count: { operator: "not_null" },
   });
 
-  assert.deepEqual(calls, [{ mode: "fetch-for-you", limit: 8, offset: 16 }]);
+  assert.deepEqual(calls, [{
+    mode: "fetch-for-you",
+    limit: 8,
+    offset: 16,
+    filters: {
+      rating: { operator: "gte", value: 4 },
+      o_count: { operator: "not_null" },
+    },
+  }]);
+});
+
+test("For You exposes rating and O-count controls and changes the reload dependency", () => {
+  const filters = {
+    rating: { operator: "gte", value: 4 },
+    o_count: { operator: "not_null" },
+  };
+
+  assert.deepEqual(forYouFilterFields(filters), [
+    {
+      key: "rating",
+      label: "Rating",
+      operators: ["gt", "gte", "lt", "lte", "eq", "is_null", "not_null"],
+      value: { operator: "gte", value: 4 },
+    },
+    {
+      key: "o_count",
+      label: "O count",
+      operators: ["gt", "gte", "lt", "lte", "eq", "is_null", "not_null"],
+      value: { operator: "not_null" },
+    },
+  ]);
+  assert.notEqual(forYouFiltersKey(filters), forYouFiltersKey({}));
 });
 
 test("forYouOffsetForPage loads the next server batch only after the current batch is exhausted", () => {
