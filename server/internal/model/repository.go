@@ -543,7 +543,7 @@ func (repository *Repository) Related(ctx context.Context, accountID string, sou
 	`, version, accountID, source.Endpoint, source.StashID, normalizeLimit(limit), maxRatingNeighbors, minimumRatingsForPrediction, ratingPredictionPriorWeight)
 }
 
-func (repository *Repository) ForYou(ctx context.Context, accountID string, limit, offset int) ([]Recommendation, string, error) {
+func (repository *Repository) ForYou(ctx context.Context, accountID string, limit, offset int, filters ForYouFilters) ([]Recommendation, string, error) {
 	version, found, err := repository.activeVersion(ctx)
 	if err != nil || !found {
 		return nil, version, err
@@ -552,13 +552,45 @@ func (repository *Repository) ForYou(ctx context.Context, accountID string, limi
 		WITH profile AS (SELECT embedding, reasons FROM model_account_profiles WHERE model_version_id = $1 AND account_id = $2),
 		rated AS (SELECT preferences.rating, vectors.embedding FROM current_preferences preferences JOIN model_scene_vectors vectors ON vectors.model_version_id = $1 AND vectors.endpoint = preferences.endpoint AND vectors.stash_id = preferences.stash_id WHERE preferences.account_id = $2),
 		baseline AS (SELECT COUNT(*) AS rating_count, AVG(rating) AS account_mean FROM rated),
-		ranked AS (SELECT candidates.endpoint, candidates.stash_id, candidates.embedding, candidates.embedding <=> profile.embedding AS distance FROM model_scene_vectors candidates CROSS JOIN profile WHERE candidates.model_version_id = $1 ORDER BY (candidates.embedding <=> profile.embedding) + 0, candidates.endpoint, candidates.stash_id LIMIT $3 OFFSET $4)
+		ratings AS (SELECT endpoint, stash_id, rating FROM current_preferences WHERE account_id = $2),
+		o_counts AS (SELECT endpoint, stash_id, COUNT(*)::double precision AS value FROM engagement_events WHERE account_id = $2 AND kind = 'scene.o' GROUP BY endpoint, stash_id),
+		ranked AS (
+			SELECT candidates.endpoint, candidates.stash_id, candidates.embedding, candidates.embedding <=> profile.embedding AS distance
+			FROM model_scene_vectors candidates
+			CROSS JOIN profile
+			LEFT JOIN ratings ON ratings.endpoint = candidates.endpoint AND ratings.stash_id = candidates.stash_id
+			LEFT JOIN o_counts ON o_counts.endpoint = candidates.endpoint AND o_counts.stash_id = candidates.stash_id
+			WHERE candidates.model_version_id = $1
+				AND (
+					$8 = ''
+					OR ($8 = 'gt' AND ratings.rating > $9)
+					OR ($8 = 'gte' AND ratings.rating >= $9)
+					OR ($8 = 'lt' AND ratings.rating < $9)
+					OR ($8 = 'lte' AND ratings.rating <= $9)
+					OR ($8 = 'eq' AND ratings.rating = $9)
+					OR ($8 = 'is_null' AND ratings.rating IS NULL)
+					OR ($8 = 'not_null' AND ratings.rating IS NOT NULL)
+				)
+				AND (
+					$10 = ''
+					OR ($10 = 'gt' AND o_counts.value > $11)
+					OR ($10 = 'gte' AND o_counts.value >= $11)
+					OR ($10 = 'lt' AND o_counts.value < $11)
+					OR ($10 = 'lte' AND o_counts.value <= $11)
+					OR ($10 = 'eq' AND o_counts.value = $11)
+					OR ($10 = 'is_null' AND o_counts.value IS NULL)
+					OR ($10 = 'not_null' AND o_counts.value IS NOT NULL)
+				)
+			ORDER BY (candidates.embedding <=> profile.embedding) + 0, candidates.endpoint, candidates.stash_id
+			LIMIT $3 OFFSET $4
+		)
 		SELECT ranked.endpoint, ranked.stash_id, 1 - ranked.distance, profile.reasons,
 		CASE WHEN baseline.rating_count < $5 THEN NULL ELSE ($6 * baseline.account_mean + COALESCE(SUM(nearest.similarity * nearest.rating), 0)) / ($6 + COALESCE(SUM(nearest.similarity), 0)) END
 		FROM ranked CROSS JOIN profile CROSS JOIN baseline LEFT JOIN LATERAL (SELECT rated.rating, GREATEST(0, 1 - (rated.embedding <=> ranked.embedding)) similarity FROM rated ORDER BY (rated.embedding <=> ranked.embedding) + 0 LIMIT $7) nearest ON true
 		GROUP BY ranked.endpoint, ranked.stash_id, ranked.distance, profile.reasons, baseline.rating_count, baseline.account_mean
 		ORDER BY ranked.distance, ranked.endpoint, ranked.stash_id
-	`, version, accountID, normalizeLimit(limit), max(offset, 0), minimumRatingsForPrediction, ratingPredictionPriorWeight, maxRatingNeighbors)
+	`, version, accountID, normalizeLimit(limit), max(offset, 0), minimumRatingsForPrediction, ratingPredictionPriorWeight, maxRatingNeighbors,
+		filters.Rating.Operator, filters.Rating.Value, filters.OCount.Operator, filters.OCount.Value)
 }
 
 func (repository *Repository) activeVersion(ctx context.Context) (string, bool, error) {

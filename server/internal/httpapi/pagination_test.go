@@ -19,3 +19,22 @@ func TestRecommendationOffsetDefaultsAndRejectsInvalidValues(t *testing.T) {
 		t.Fatal("negative offset accepted")
 	}
 }
+
+func TestRecommendationFiltersParseNumericPredicates(t *testing.T) {
+	request := httptest.NewRequest("GET", "/v1/recommendations/for-you?rating_operator=gte&rating_value=4&o_count_operator=not_null", nil)
+	filters, err := recommendationFilters(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filters.Rating.Operator != "gte" || filters.Rating.Value != 4 || filters.OCount.Operator != "not_null" {
+		t.Fatalf("unexpected filters: %#v", filters)
+	}
+}
+
+func TestRecommendationFiltersRejectValuesForNullPredicates(t *testing.T) {
+	request := httptest.NewRequest("GET", "/v1/recommendations/for-you?rating_operator=is_null&rating_value=4", nil)
+	_, err := recommendationFilters(request)
+	if err == nil {
+		t.Fatal("null predicate accepted a numeric value")
+	}
+}
