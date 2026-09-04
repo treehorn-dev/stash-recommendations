@@ -42,15 +42,15 @@ func TestBuildUsesCatalogVectorsForRelatedAndProfileRecommendations(t *testing.T
 	require.Contains(t, reasonsFor(items, "scene-b"), "content_similarity")
 	require.Nil(t, items[0].CanonicalURL)
 
-	forYou, activeVersion, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10, 0)
+	forYou, activeVersion, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10, 0, ForYouFilters{})
 	require.NoError(t, err)
 	require.Equal(t, versionID, activeVersion)
 	require.Contains(t, recommendationIDs(forYou), "scene-b")
 	require.Contains(t, reasonsFor(forYou, "scene-b"), "rating_profile")
 	require.Contains(t, reasonsFor(forYou, "scene-b"), "play_profile")
-	firstPage, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 1, 0)
+	firstPage, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 1, 0, ForYouFilters{})
 	require.NoError(t, err)
-	secondPage, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 1, 1)
+	secondPage, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 1, 1, ForYouFilters{})
 	require.NoError(t, err)
 	require.NotEqual(t, recommendationIDs(firstPage), recommendationIDs(secondPage))
 }
@@ -80,7 +80,7 @@ func TestForYouIncludesPredictedRatingForSufficientRatingHistory(t *testing.T) {
 
 	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
 	require.NoError(t, err)
-	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10, 0)
+	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 10, 0, ForYouFilters{})
 	require.NoError(t, err)
 	for _, item := range items {
 		if item.ContentKey.StashID == "candidate" {
@@ -91,6 +91,36 @@ func TestForYouIncludesPredictedRatingForSufficientRatingHistory(t *testing.T) {
 		}
 	}
 	t.Fatal("expected candidate recommendation")
+}
+
+func TestForYouAppliesRatingAndOCountFiltersBeforePagination(t *testing.T) {
+	repository, pool := openModelTestStore(t)
+	ctx := context.Background()
+	account := seedModelAccount(t, pool)
+	seedSharedTagScenes(t, pool, "scene-a", "scene-b", "scene-c")
+	seedRating(t, pool, account, "scene-a", 1)
+
+	_, err := NewBuilder(NewRepository(repository.Pool()), DefaultOWeight).BuildAndActivate(ctx)
+	require.NoError(t, err)
+
+	// scene-c sorts after the unfiltered first page but is the only candidate
+	// that satisfies both predicates.
+	seedRating(t, pool, account, "scene-c", 0.8)
+	for sequence := 1; sequence <= 2; sequence++ {
+		_, err = pool.Exec(ctx, `
+			INSERT INTO engagement_events (
+				account_id, event_id, client_id, sequence, endpoint, stash_id, kind, occurred_at, origin, body_hash
+			) VALUES ($1, $2, '550e8400-e29b-41d4-a716-446655440002', $3, $4, 'scene-c', 'scene.o', now(), 'history', '\x01')
+		`, account, fmt.Sprintf("550e8400-e29b-41d4-a716-4466554400%02d", sequence), sequence, modelEndpoint)
+		require.NoError(t, err)
+	}
+
+	items, _, err := NewRepository(repository.Pool()).ForYou(ctx, account, 1, 0, ForYouFilters{
+		Rating: NumericPredicate{Operator: "gte", Value: 0.8},
+		OCount: NumericPredicate{Operator: "gte", Value: 2},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"scene-c"}, recommendationIDs(items))
 }
 
 func TestCanonicalURLsResolvesDistinctEndpointTemplatesInOneSet(t *testing.T) {

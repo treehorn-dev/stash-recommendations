@@ -19,6 +19,15 @@ type Recommendation struct {
 	PredictedRating *float64          `json:"predicted_rating"`
 }
 
+type NumericPredicate struct {
+	Operator string
+	Value    float64
+}
+type ForYouFilters struct {
+	Rating NumericPredicate
+	OCount NumericPredicate
+}
+
 type Rating struct {
 	AccountID  string
 	ContentKey domain.ContentKey
@@ -83,7 +92,7 @@ type RecommendationStore interface {
 // Reader serves recommendations from the active model version.
 type Reader interface {
 	Related(ctx context.Context, accountID string, source domain.ContentKey, limit int) ([]Recommendation, string, error)
-	ForYou(ctx context.Context, accountID string, limit, offset int) ([]Recommendation, string, error)
+	ForYou(ctx context.Context, accountID string, limit, offset int, filters ForYouFilters) ([]Recommendation, string, error)
 }
 
 type buildSource interface {

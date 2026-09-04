@@ -103,6 +103,22 @@ func TestRecommendationReadsReturnEmptyColdStartAndOmitCanonicalURL(t *testing.T
 	require.Equal(t, json.RawMessage("null"), body.Items[0]["canonical_url"])
 }
 
+func TestForYouRejectsInvalidNumericFilters(t *testing.T) {
+	repository, _ := openRecommendationTestStore(t)
+	account, err := repository.CreateAccount(context.Background())
+	require.NoError(t, err)
+	handler := httpapi.NewMux(httpapi.Dependencies{
+		AccountRepository:    repository,
+		RecommendationReader: model.NewRepository(repository.Pool()),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/recommendations/for-you?rating_operator=is_null&rating_value=4", nil)
+	request.Header.Set("Authorization", "Bearer "+account.PlaintextKey)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+}
+
 func TestRelatedReadsReturnPersonalPredictedRating(t *testing.T) {
 	repository, pool := openRecommendationTestStore(t)
 	ctx := context.Background()
