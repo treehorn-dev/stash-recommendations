@@ -137,10 +137,13 @@ rm -rf "$helper_dir"
 
 For development, the server also supports `BUILD_MODEL_ON_START=true` on boot.
 For an explicit production rebuild without starting another HTTP listener, run
-the service binary with `REBUILD_MODEL_ONCE=true`; it migrates, activates one
-new model version, logs the version, and exits.
+the service binary with `REBUILD_MODEL_ONCE=true`; it migrates, rebuilds every
+account's sessions, activates one new model version, logs the version, and exits.
 `MODEL_O_WEIGHT` defaults to `1.5` and may be overridden with a positive
-number. A build stores one 256-dimensional hashed vector per source scene and
+number. The service rebuilds every account's sessions and model every five
+minutes by default; set `MODEL_REFRESH_INTERVAL` to a Go duration such as
+`10m`, or to `0s` to disable periodic refreshes. A build stores one
+256-dimensional hashed vector per source scene and
 uses bounded pgvector cosine retrieval for related scenes and account profiles;
 it does not materialize pairwise scene recommendations. For accounts with at
 least five current explicit ratings that have model vectors, responses also

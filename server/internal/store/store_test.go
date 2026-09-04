@@ -227,6 +227,22 @@ func TestMigrateAddsSourceCatalogProjectionColumnsToExistingStore(t *testing.T) 
 	require.Equal(t, []string{"001_initial", "002_api_key_identifier", "003_legacy_api_key_auth", "004_revoke_legacy_api_keys", "005_session_projections", "006_source_catalog_projections", "007_recommendation_indexes", "008_source_catalog_groups", "009_pgvector_recommendations", "010_predicted_ratings", "011_model_account_profiles"}, versions)
 }
 
+func TestAccountIDsReturnsEveryAccountInCreationOrder(t *testing.T) {
+	repository := openIsolatedMigrationStore(t)
+	ctx := context.Background()
+	require.NoError(t, repository.Migrate(ctx))
+
+	first, err := repository.CreateAccount(ctx)
+	require.NoError(t, err)
+	second, err := repository.CreateAccount(ctx)
+	require.NoError(t, err)
+
+	accountIDs, err := repository.AccountIDs(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{first.ID, second.ID}, accountIDs)
+}
+
 func openIsolatedMigrationStore(t *testing.T) *Store {
 	t.Helper()
 	dsn := os.Getenv("POSTGRES_TEST_DSN")

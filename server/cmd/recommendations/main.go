@@ -10,6 +10,8 @@ import (
 	"github.com/treehorn/stash-recommendations/server/internal/httpapi"
 	"github.com/treehorn/stash-recommendations/server/internal/ingest"
 	"github.com/treehorn/stash-recommendations/server/internal/model"
+	"github.com/treehorn/stash-recommendations/server/internal/refresh"
+	"github.com/treehorn/stash-recommendations/server/internal/session"
 	"github.com/treehorn/stash-recommendations/server/internal/store"
 )
 
@@ -29,18 +31,31 @@ func main() {
 		log.Fatal(err)
 	}
 	modelRepository := model.NewRepository(repository.Pool())
+	modelRefresh := refresh.NewRunner(
+		repository,
+		session.NewBuilder(repository.Pool()),
+		model.NewBuilder(modelRepository, cfg.ModelOWeight),
+	)
 	if cfg.RebuildModelOnce {
-		version, err := model.NewBuilder(modelRepository, cfg.ModelOWeight).BuildAndActivate(ctx)
+		version, err := modelRefresh.Refresh(ctx)
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("recommendation model build activated version=%s", version)
+		log.Printf("recommendation refresh activated version=%s", version)
 		return
 	}
 	if cfg.BuildModelOnStart {
-		if _, err := model.NewBuilder(modelRepository, cfg.ModelOWeight).BuildAndActivate(ctx); err != nil {
-			log.Printf("recommendation model build failed; retaining the prior active version: %v", err)
+		if _, err := modelRefresh.Refresh(ctx); err != nil {
+			log.Printf("recommendation refresh failed; retaining the prior active version: %v", err)
 		}
+	}
+	if cfg.ModelRefreshInterval > 0 {
+		go refresh.RunPeriodically(ctx, cfg.ModelRefreshInterval, modelRefresh.Refresh,
+			func(version string) { log.Printf("recommendation refresh activated version=%s", version) },
+			func(err error) {
+				log.Printf("recommendation refresh failed; retaining the prior active version: %v", err)
+			},
+		)
 	}
 
 	handler := httpapi.NewMux(httpapi.Dependencies{

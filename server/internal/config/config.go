@@ -5,15 +5,17 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config contains the process configuration supplied through the environment.
 type Config struct {
-	HTTPAddr          string
-	DatabaseURL       string
-	ModelOWeight      float64
-	BuildModelOnStart bool
-	RebuildModelOnce  bool
+	HTTPAddr             string
+	DatabaseURL          string
+	ModelOWeight         float64
+	ModelRefreshInterval time.Duration
+	BuildModelOnStart    bool
+	RebuildModelOnce     bool
 }
 
 // Load reads the service configuration from the environment.
@@ -25,6 +27,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("MODEL_O_WEIGHT must be a positive number")
 		}
 		oWeight = parsed
+	}
+	refreshInterval := 5 * time.Minute
+	if raw := os.Getenv("MODEL_REFRESH_INTERVAL"); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed < 0 {
+			return Config{}, fmt.Errorf("MODEL_REFRESH_INTERVAL must be a Go duration")
+		}
+		refreshInterval = parsed
 	}
 	buildModelOnStart := false
 	if raw := os.Getenv("BUILD_MODEL_ON_START"); raw != "" {
@@ -43,10 +53,11 @@ func Load() (Config, error) {
 		rebuildModelOnce = parsed
 	}
 	return Config{
-		HTTPAddr:          os.Getenv("HTTP_ADDR"),
-		DatabaseURL:       os.Getenv("DATABASE_URL"),
-		ModelOWeight:      oWeight,
-		BuildModelOnStart: buildModelOnStart,
-		RebuildModelOnce:  rebuildModelOnce,
+		HTTPAddr:             os.Getenv("HTTP_ADDR"),
+		DatabaseURL:          os.Getenv("DATABASE_URL"),
+		ModelOWeight:         oWeight,
+		ModelRefreshInterval: refreshInterval,
+		BuildModelOnStart:    buildModelOnStart,
+		RebuildModelOnce:     rebuildModelOnce,
 	}, nil
 }

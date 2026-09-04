@@ -191,6 +191,28 @@ func (store *Store) Authenticate(ctx context.Context, plaintextKey string) (Acco
 	return account, nil
 }
 
+// AccountIDs returns every account that needs its recommendation projections refreshed.
+func (store *Store) AccountIDs(ctx context.Context) ([]string, error) {
+	rows, err := store.pool.Query(ctx, "SELECT id FROM accounts ORDER BY created_at, id")
+	if err != nil {
+		return nil, fmt.Errorf("query account ids: %w", err)
+	}
+	defer rows.Close()
+
+	var accountIDs []string
+	for rows.Next() {
+		var accountID string
+		if err := rows.Scan(&accountID); err != nil {
+			return nil, fmt.Errorf("scan account id: %w", err)
+		}
+		accountIDs = append(accountIDs, accountID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate account ids: %w", err)
+	}
+	return accountIDs, nil
+}
+
 func (store *Store) AcceptInteractionEvent(ctx context.Context, accountID string, event domain.PreferenceEvent, bodyHash []byte) (bool, error) {
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
