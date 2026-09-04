@@ -519,6 +519,18 @@ test("For You renders local recommendations through the shared ranked collection
   assert.equal(calls[0].sort.value, "score");
 });
 
+test("local recommendation lookup requests the native SceneCard collection fields", () => {
+  const source = require("node:fs").readFileSync(modulePath, "utf8");
+  const query = source.match(/query FindLocalRecommendationScenes[\s\S]*?\n    `;/)?.[0] || "";
+
+  for (const field of ["files", "galleries", "groups", "performers", "scene_markers", "tags"]) {
+    assert.match(query, new RegExp(`\\b${field}\\s*\\{`), `missing SceneCard field: ${field}`);
+  }
+  assert.match(query, /organized/);
+  assert.match(query, /fingerprints\s*\{/);
+  assert.match(query, /vtt/);
+});
+
 test("For You does not render local scenes through the generic entity card surface", () => {
   const cards = [];
   const { routes } = registerUi(
