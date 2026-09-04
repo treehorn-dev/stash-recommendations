@@ -85,6 +85,16 @@ test("prediction cache invalidates stale asynchronous loads by version", () => {
   assert.equal(cache.isCurrent(second), true);
 });
 
+test("prediction cache retains prior page values during append pagination", () => {
+  const cache = createPredictedRatingsCache();
+  cache.beginLoad();
+  cache.scores.set("page-one", 4.5);
+  const append = cache.beginLoad({ append: true });
+
+  assert.equal(cache.scores.get("page-one"), 4.5);
+  assert.equal(cache.isCurrent(append), true);
+});
+
 test("local scene lookup batches by endpoint and preserves content-key matches", () => {
   const items = [
     { content_key: { endpoint: "https://one.example/graphql", stash_id: "scene-1" } },

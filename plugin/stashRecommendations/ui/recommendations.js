@@ -18,8 +18,8 @@
     const scores = new Map();
     let version = 0;
     return {
-      beginLoad() {
-        clearPredictedRatings(scores);
+      beginLoad({ append = false } = {}) {
+        if (!append) clearPredictedRatings(scores);
         version += 1;
         return version;
       },
@@ -923,7 +923,7 @@
       React.useEffect(() => {
         let active = true;
         async function runLoad() {
-          const loadPredictionVersion = predictedRatings.beginLoad();
+          const loadPredictionVersion = predictedRatings.beginLoad({ append: Boolean(options.append) });
           registerPredictedRatingProvider(root, predictedRatings.scores);
           setState((previous) => options.append
             ? { ...previous, error: "", loading: true }
