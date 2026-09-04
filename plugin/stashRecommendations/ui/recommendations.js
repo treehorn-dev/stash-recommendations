@@ -514,15 +514,13 @@
     }
 
     function RecommendationCard(props) {
+      if (props.entry.kind === "local") {
+        return props.NativeSceneCard
+          ? React.createElement(props.NativeSceneCard, { scene: props.entry.scene })
+          : React.createElement("div", { className: "stash-recommendations__card-loading" }, "Loading scene card...");
+      }
       if (SharedComponents?.renderEntityCard) {
         const badgeCells = recommendationBadgeCells(props.entry);
-        if (DEV_CARD_DEMO && props.entry.kind === "local") {
-          badgeCells.push(
-            { kind: "score", label: "Demo local rating", source: "local", tone: "rating-100-18", value: "4.5" },
-            { kind: "score", label: "Demo predicted rating", source: "predicted", tone: "rating-100-12", value: "3.1" },
-            { kind: "new", label: "Demo new", value: "New" }
-          );
-        }
         const visibleBadgeCells = badgeCells.slice(0, 3);
         const badgeRail = visibleBadgeCells.length
           ? React.createElement(
@@ -691,7 +689,7 @@
       return String(entry.item?.title || entry.url || "");
     }
 
-    function renderRecommendationSection(name, entries, title, controls) {
+    function renderRecommendationSection(name, entries, title, controls, NativeSceneCard) {
       if (!SharedComponents?.renderRankedCollectionSurface) {
         return React.createElement(
           "section",
@@ -703,6 +701,7 @@
             entries.map((entry, index) => React.createElement(RecommendationCard, {
               entry,
               key: `${entry.kind}:${entry.kind === "local" ? entry.scene.id : entry.url}:${index}`,
+              NativeSceneCard,
             }))
           )
         );
@@ -722,6 +721,7 @@
           renderItem: (record, index) => React.createElement(RecommendationCard, {
             entry: record.item,
             key: `${record.item.kind}:${record.item.kind === "local" ? record.item.scene.id : record.item.url}:${index}`,
+            NativeSceneCard,
           }),
           pagination: {
             onPageChange: controls.onPageChange,
@@ -890,6 +890,9 @@
     }
 
     function RecommendationPanel(props) {
+      const componentsLoading = PluginApi.hooks?.useLoadComponents
+        ? PluginApi.hooks.useLoadComponents([PluginApi.loadableComponents.SceneCard])
+        : false;
       const state = useRecommendationState(props.loader, props.dependency, {
         append: props.append,
         fetchMore: props.fetchMore,
@@ -976,7 +979,7 @@
         (props.combineLocalSections ? ["local", "remote"] : ["unwatched", "watched", "remote"]).map((name) => {
           const entries = sections[name];
           if (!entries.length) return null;
-          return renderRecommendationSection(name, entries, props.sectionTitles[name], controlsFor(name));
+          return renderRecommendationSection(name, entries, props.sectionTitles[name], controlsFor(name), componentsLoading ? null : PluginApi.components?.SceneCard);
         })
       );
     }
