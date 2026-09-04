@@ -17,6 +17,8 @@ const {
   formatRecommendationReasons,
   sceneCountRailEntries,
   recommendationBadgeCells,
+  cachePredictedRatings,
+  registerPredictedRatingProvider,
   fetchForYou,
   forYouFilterFields,
   forYouFiltersKey,
@@ -28,6 +30,33 @@ const {
   resolveLocalRecommendations,
   shouldFetchAnotherForYouBatch,
 } = require(modulePath);
+
+test("registers cached prediction values only when Better Scene Card is available", () => {
+  const scores = new Map();
+  cachePredictedRatings([
+    { kind: "local", item: { predicted_rating: 4.2 }, scene: { id: "42" } },
+    { kind: "local", item: { predicted_rating: "invalid" }, scene: { id: "43" } },
+    { kind: "local", item: { predicted_rating: null }, scene: { id: "44" } },
+  ], scores);
+  assert.equal(scores.get("42"), 4.2);
+  assert.equal(scores.has("43"), false);
+  assert.equal(scores.has("44"), false);
+
+  const calls = [];
+  const root = {
+    StashBetterSceneCard: {
+      registerValue(name, provider) {
+        calls.push({ name, provider });
+        return true;
+      },
+    },
+  };
+  assert.equal(registerPredictedRatingProvider(root, scores), true);
+  assert.equal(calls[0].name, "stash-recommendations.predicted-rating");
+  assert.equal(calls[0].provider.get({ scene: { id: "42" } }), 4.2);
+  assert.equal(calls[0].provider.get({ scene: { id: "missing" } }), undefined);
+  assert.equal(registerPredictedRatingProvider({}, scores), false);
+});
 
 test("local scene lookup batches by endpoint and preserves content-key matches", () => {
   const items = [
