@@ -18,6 +18,8 @@ const {
   sceneCountRailEntries,
   recommendationBadgeCells,
   cachePredictedRatings,
+  clearPredictedRatings,
+  createPredictedRatingsCache,
   registerPredictedRatingProvider,
   fetchForYou,
   forYouFilterFields,
@@ -32,7 +34,9 @@ const {
 } = require(modulePath);
 
 test("registers cached prediction values only when Better Scene Card is available", () => {
-  const scores = new Map();
+  const scores = new Map([["stale", 4.9], ["43", 3.3], ["44", 3.5]]);
+  clearPredictedRatings(scores);
+  assert.equal(scores.size, 0);
   cachePredictedRatings([
     { kind: "local", item: { predicted_rating: 4.2 }, scene: { id: "42" } },
     { kind: "local", item: { predicted_rating: "invalid" }, scene: { id: "43" } },
@@ -56,6 +60,29 @@ test("registers cached prediction values only when Better Scene Card is availabl
   assert.equal(calls[0].provider.get({ scene: { id: "42" } }), 4.2);
   assert.equal(calls[0].provider.get({ scene: { id: "missing" } }), undefined);
   assert.equal(registerPredictedRatingProvider({}, scores), false);
+});
+
+test("replaces prior values when a scene no longer has a finite prediction", () => {
+  const scores = new Map([["42", 4.5], ["43", 3.5], ["unchanged", 2.5]]);
+  cachePredictedRatings([
+    { kind: "local", item: { predicted_rating: null }, scene: { id: "42" } },
+    { kind: "local", item: { predicted_rating: "not-a-number" }, scene: { id: "43" } },
+  ], scores);
+
+  assert.equal(scores.has("42"), false);
+  assert.equal(scores.has("43"), false);
+  assert.equal(scores.get("unchanged"), 2.5);
+});
+
+test("prediction cache invalidates stale asynchronous loads by version", () => {
+  const cache = createPredictedRatingsCache();
+  const first = cache.beginLoad();
+  cache.scores.set("42", 4.5);
+  const second = cache.beginLoad();
+
+  assert.equal(cache.scores.size, 0);
+  assert.equal(cache.isCurrent(first), false);
+  assert.equal(cache.isCurrent(second), true);
 });
 
 test("local scene lookup batches by endpoint and preserves content-key matches", () => {
