@@ -483,7 +483,7 @@ test("For You renders local recommendations through the shared ranked collection
   assert.equal(calls[0].sort.value, "score");
 });
 
-test("For You maps local scenes into the generic entity card surface", () => {
+test("For You does not render local scenes through the generic entity card surface", () => {
   const cards = [];
   const { routes } = registerUi(
     {
@@ -532,31 +532,7 @@ test("For You maps local scenes into the generic entity card surface", () => {
 
   routes.find((entry) => entry.path === "/plugins/stash-recommendations").component({});
 
-  assert.equal(cards.length, 1);
-  assert.equal(cards[0].attributes, undefined);
-  assert.equal(cards[0].showZeroCounts, false);
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "performers").count, "1");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "groups").icon.props.icon, "film");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "markers").icon.props.icon, "location-dot");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "plays").icon.props.icon, "eye");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").icon.type, "span");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").icon.props.children.type, "svg");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").count, "2");
-  assert.equal(cards[0].thumbnail.href, "/scenes/44");
-  assert.equal(cards[0].thumbnail.previewSrc, "/scene/44/preview");
-  assert.equal(cards[0].mediaRail.props.src, "/scene/44/heatmap");
-  assert.equal(cards[0].thumbnail.overlay.props.className, "stash-recommendations__poster-overlays");
-  const posterChildren = cards[0].thumbnail.overlay.props.children.filter(Boolean);
-  const posterBadges = posterChildren.find((child) => child.props.className === "stash-recommendations__poster-badges").props.children.props.children;
-  assert.equal(posterBadges.length, 3);
-  assert.equal(new Set(posterBadges.map((cell) => cell.props.key)).size, 3);
-  assert.equal(posterChildren.find((child) => child.props.className === "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--studio").props.children, "Studio One");
-  assert.equal(posterChildren.find((child) => child.props.className === "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--duration").props.children, "1:02:03");
-  assert.equal(posterChildren.find((child) => child.props.className === "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--speed").props.children, 140);
-  assert.equal(cards[0].footer, null);
-  assert.equal(cards[0].header, undefined);
-  assert.equal(cards[0].badgeRail, undefined);
-  assert.equal(cards[0].title.props.children[1].props.children, "2026-09-03");
+  assert.equal(cards.length, 0);
 });
 
 function registerUi(state, StashPluginComponents) {
