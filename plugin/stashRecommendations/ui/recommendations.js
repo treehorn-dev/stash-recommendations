@@ -357,34 +357,75 @@
           scenes {
             id
             title
+            code
             details
+            director
+            urls
             rating100
             play_count
             o_counter
+            organized
             interactive
             interactive_speed
             date
+            resume_time
+            play_duration
             play_history
             o_history
             scene_markers {
               id
               title
+              seconds
+              primary_tag {
+                id
+                name
+              }
+            }
+            galleries {
+              id
+              title
+              files {
+                path
+              }
+              folder {
+                path
+              }
             }
             paths {
               screenshot
               preview
+              stream
+              webp
+              vtt
+              sprite
+              funscript
               interactive_heatmap
+              caption
             }
             files {
-              audio_codec
-              basename
               id
+              path
+              size
+              mod_time
               duration
               video_codec
+              audio_codec
+              width
+              height
+              frame_rate
+              bit_rate
+              fingerprints {
+                type
+                value
+              }
             }
             performers {
               id
               name
+              disambiguation
+              gender
+              favorite
+              image_path
             }
             tags {
               id
@@ -394,15 +435,19 @@
               group {
                 id
                 name
+                front_image_path
               }
+              scene_index
             }
             studio {
               id
               name
+              image_path
             }
             stash_ids {
               endpoint
               stash_id
+              updated_at
             }
           }
         }
