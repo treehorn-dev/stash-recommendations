@@ -244,9 +244,29 @@ def test_fetch_for_you_mode_proxies_authenticated_read_without_api_key_markup(
 
     encoded = str(output["output"])
 
-    assert client.for_you_calls == [(8, 0)]
+    assert client.for_you_calls == [(8, 0, None)]
     assert output["output"] == {"model_version": "model-2", "items": [recommendation_item("scene-z", 0.5)]}
     assert "secret-api-key" not in encoded
+
+
+def test_fetch_for_you_mode_proxies_numeric_filters(tmp_path: Path, monkeypatch: object) -> None:
+    client = FakeReadServiceClient({}, for_you={"model_version": "model-2", "items": []})
+    monkeypatch.setattr("recommendations.StashClient", lambda server_connection: FakeConfiguredStash(tmp_path))
+    monkeypatch.setattr("recommendations.ServiceClient", lambda settings: client)
+
+    output: dict[str, object] = {}
+    run(
+        {
+            "server_connection": {"PluginDir": str(tmp_path)},
+            "args": {
+                "mode": "fetch-for-you",
+                "filters": {"rating": {"operator": "gte", "value": 4}},
+            },
+        },
+        output,
+    )
+
+    assert client.for_you_calls == [(20, 0, {"rating": {"operator": "gte", "value": 4}})]
 
 
 def test_status_clears_paused_auth_when_settings_change(tmp_path: Path, monkeypatch: object) -> None:
@@ -351,15 +371,17 @@ class FakeReadServiceClient:
         self._related = related
         self._for_you = for_you or {"model_version": "", "items": []}
         self.related_calls: list[tuple[list[dict[str, str]], int]] = []
-        self.for_you_calls: list[tuple[int, int]] = []
+        self.for_you_calls: list[tuple[int, int, dict[str, object] | None]] = []
 
     def fetch_related(self, content_keys: list[dict[str, str]], limit: int) -> dict[str, object]:
         self.related_calls.append((content_keys, limit))
         key = content_keys[0]["endpoint"], content_keys[0]["stash_id"]
         return dict(self._related[key])
 
-    def fetch_for_you(self, limit: int, *, offset: int = 0) -> dict[str, object]:
-        self.for_you_calls.append((limit, offset))
+    def fetch_for_you(
+        self, limit: int, *, offset: int = 0, filters: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        self.for_you_calls.append((limit, offset, filters))
         return dict(self._for_you)
 
 

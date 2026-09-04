@@ -114,7 +114,9 @@ def run(plugin_input: dict[str, Any], output: dict[str, Any]) -> None:
             output["output"] = {"model_version": "", "items": []}
             return
         output["output"] = ServiceClient(settings).fetch_for_you(
-            int(args.get("limit", 20)), offset=int(args.get("offset", 0))
+            int(args.get("limit", 20)),
+            offset=int(args.get("offset", 0)),
+            filters=args.get("filters") if isinstance(args.get("filters"), dict) else None,
         )
         return
     raise ValueError(f"unsupported mode: {mode}")
