@@ -475,6 +475,9 @@ test("For You renders local scenes with Stash SceneCard", () => {
 
   assert.equal(nativeCards.length, 1);
   assert.equal(nativeCards[0].scene.id, "44");
+  assert.deepEqual(nativeCards[0].scene.galleries, []);
+  assert.deepEqual(nativeCards[0].scene.groups, []);
+  assert.deepEqual(nativeCards[0].scene.urls, []);
   assert.equal(nativeCards[0].selecting, false);
   assert.equal(typeof nativeCards[0].onSelectedChanged, "function");
   assert.equal(cards.length, 0);

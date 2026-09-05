@@ -281,51 +281,97 @@
           scenes {
             id
             title
+            code
             details
+            director
+            urls
+            date
             rating100
             play_count
             o_counter
+            organized
             interactive
             interactive_speed
+            resume_time
+            play_duration
             play_history
             o_history
             scene_markers {
               id
               title
+              seconds
+              primary_tag {
+                id
+                name
+              }
+            }
+            galleries {
+              id
+              title
+              files {
+                path
+              }
+              folder {
+                path
+              }
             }
             paths {
               screenshot
               preview
+              stream
+              webp
+              vtt
+              sprite
+              funscript
               interactive_heatmap
+              caption
             }
             files {
-              audio_codec
-              basename
               id
+              path
+              size
+              mod_time
               duration
               video_codec
+              audio_codec
+              width
+              height
+              frame_rate
+              bit_rate
+              fingerprints {
+                type
+                value
+              }
             }
             performers {
               id
               name
+              disambiguation
+              gender
+              favorite
+              image_path
             }
             tags {
               id
               name
             }
             groups {
+              scene_index
               group {
                 id
                 name
+                front_image_path
               }
             }
             studio {
               id
               name
+              image_path
             }
             stash_ids {
               endpoint
               stash_id
+              updated_at
             }
           }
         }
@@ -475,11 +521,28 @@
       );
     }
 
+    function nativeSceneCardData(scene) {
+      const source = scene || {};
+
+      return {
+        ...source,
+        files: Array.isArray(source.files) ? source.files : [],
+        galleries: Array.isArray(source.galleries) ? source.galleries : [],
+        groups: Array.isArray(source.groups) ? source.groups : [],
+        performers: Array.isArray(source.performers) ? source.performers : [],
+        scene_markers: Array.isArray(source.scene_markers) ? source.scene_markers : [],
+        stash_ids: Array.isArray(source.stash_ids) ? source.stash_ids : [],
+        tags: Array.isArray(source.tags) ? source.tags : [],
+        urls: Array.isArray(source.urls) ? source.urls : [],
+        paths: source.paths || {},
+      };
+    }
+
     function RecommendationCard(props) {
       if (props.entry.kind === "local") {
         return props.NativeSceneCard
           ? React.createElement(props.NativeSceneCard, {
-              scene: props.entry.scene,
+              scene: nativeSceneCardData(props.entry.scene),
               selecting: props.selecting,
               selected: props.selectedLocalIds.has(String(props.entry.scene.id)),
               onSelectedChanged: (selected) => props.onLocalSelectionChanged(
