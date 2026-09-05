@@ -418,8 +418,9 @@ test("For You renders local recommendations through the shared ranked collection
   assert.equal(calls[0].sort.value, "score");
 });
 
-test("For You maps local scenes into the generic entity card surface", () => {
+test("For You renders local scenes with Stash SceneCard", () => {
   const cards = [];
+  const nativeCards = [];
   const { routes } = registerUi(
     {
       error: "",
@@ -461,57 +462,37 @@ test("For You maps local scenes into the generic entity card surface", () => {
       renderRankedCollectionSurface(runtime, props) {
         return props.renderItem({ item: props.items[0] }, 0);
       },
-    }
+    },
+    {
+      SceneCard(props) {
+        nativeCards.push(props);
+        return { type: "native-scene-card", props };
+      },
+    },
   );
 
   routes.find((entry) => entry.path === "/plugins/stash-recommendations").component({});
 
-  assert.equal(cards.length, 1);
-  assert.equal(cards[0].attributes, undefined);
-  assert.equal(cards[0].showZeroCounts, false);
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "performers").count, "1");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "groups").icon.props.icon, "film");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "markers").icon.props.icon, "location-dot");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "plays").icon.props.icon, "eye");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").icon.type, "span");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").icon.props.children.type, "svg");
-  assert.equal(cards[0].countRail.find((entry) => entry.key === "o-count").count, "2");
-  assert.equal(cards[0].thumbnail.href, "/scenes/44");
-  assert.equal(cards[0].thumbnail.previewSrc, "/scene/44/preview");
-  assert.equal(cards[0].mediaRail.props.src, "/scene/44/heatmap");
-  assert.equal(cards[0].thumbnail.overlay.props.className, "stash-recommendations__poster-overlays");
-  assert.equal(cards[0].thumbnail.overlay.props.children[0].props.className, "stash-recommendations__poster-overlay stash-recommendations__poster-overlay--studio");
-  assert.equal(cards[0].thumbnail.overlay.props.children[1].props.children, "1:02:03");
-  assert.equal(cards[0].thumbnail.overlay.props.children[2].props.children, 140);
-  assert.equal(cards[0].footer.props.children, "Why: watch history");
-  assert.equal(cards[0].header, undefined);
-  assert.deepEqual(
-    cards[0].badgeRail.props.children.map((cell) => ({
-      className: cell.props.className,
-      title: cell.props.title,
-      value: cell.props.children,
-    })),
-    [
-      {
-        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--score stash-recommendations__badge-cell--local stash-recommendations__badge-cell--rating-100-18",
-        title: "Your rating",
-        value: "4.5",
-      },
-      {
-        className: "stash-recommendations__badge-cell stash-recommendations__badge-cell--new",
-        title: "New",
-        value: "New",
-      },
-    ]
-  );
+  assert.equal(nativeCards.length, 1);
+  assert.equal(nativeCards[0].scene.id, "44");
+  assert.equal(nativeCards[0].selecting, false);
+  assert.equal(typeof nativeCards[0].onSelectedChanged, "function");
+  assert.equal(cards.length, 0);
 });
 
-function registerUi(state, StashPluginComponents) {
+function registerUi(state, StashPluginComponents, components = {}) {
   const routes = [];
   const patches = [];
   const React = createReactHarness(state);
   const PluginApi = {
+    components,
+    loadableComponents: { SceneCard: "SceneCard" },
     React,
+    hooks: {
+      useLoadComponents() {
+        return false;
+      },
+    },
     libraries: {
       Apollo: {
         gql(strings, ...values) {
@@ -587,8 +568,8 @@ function createReactHarness(state) {
       return { type, props: normalizedProps };
     },
     useEffect() {},
-    useState() {
-      return [state, () => {}];
+    useState(initial) {
+      return [typeof initial === "function" ? initial() : state, () => {}];
     },
   };
 }

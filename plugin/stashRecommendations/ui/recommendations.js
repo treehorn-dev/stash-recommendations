@@ -476,6 +476,20 @@
     }
 
     function RecommendationCard(props) {
+      if (props.entry.kind === "local") {
+        return props.NativeSceneCard
+          ? React.createElement(props.NativeSceneCard, {
+              scene: props.entry.scene,
+              selecting: props.selecting,
+              selected: props.selectedLocalIds.has(String(props.entry.scene.id)),
+              onSelectedChanged: (selected) => props.onLocalSelectionChanged(
+                String(props.entry.scene.id),
+                selected,
+              ),
+            })
+          : React.createElement("div", { className: "stash-recommendations__card-loading" }, "Loading scene card...");
+      }
+
       if (SharedComponents?.renderEntityCard) {
         const badgeCells = recommendationBadgeCells(props.entry);
         const badgeRail = badgeCells.length
@@ -640,7 +654,7 @@
       return String(entry.item?.title || entry.url || "");
     }
 
-    function renderRecommendationSection(name, entries, title, controls) {
+    function renderRecommendationSection(name, entries, title, controls, NativeSceneCard, selection) {
       if (!SharedComponents?.renderRankedCollectionSurface) {
         return React.createElement(
           "section",
@@ -652,6 +666,8 @@
             entries.map((entry, index) => React.createElement(RecommendationCard, {
               entry,
               key: `${entry.kind}:${entry.kind === "local" ? entry.scene.id : entry.url}:${index}`,
+              NativeSceneCard,
+              ...selection,
             }))
           )
         );
@@ -671,6 +687,8 @@
           renderItem: (record, index) => React.createElement(RecommendationCard, {
             entry: record.item,
             key: `${record.item.kind}:${record.item.kind === "local" ? record.item.scene.id : record.item.url}:${index}`,
+            NativeSceneCard,
+            ...selection,
           }),
           pagination: {
             onPageChange: controls.onPageChange,
@@ -819,8 +837,20 @@
     }
 
     function RecommendationPanel(props) {
+      const componentsLoading = PluginApi.hooks.useLoadComponents([
+        PluginApi.loadableComponents.SceneCard,
+      ]);
       const state = useRecommendationState(props.loader, props.dependency, { append: props.append });
+      const [selectedLocalIds, setSelectedLocalIds] = React.useState(() => new Set());
       const [sectionControls, setSectionControls] = React.useState({});
+      function onLocalSelectionChanged(sceneId, selected) {
+        setSelectedLocalIds((previous) => {
+          const next = new Set(previous);
+          if (selected) next.add(sceneId);
+          else next.delete(sceneId);
+          return next;
+        });
+      }
 
       if (state.loading) {
         return React.createElement(RecommendationState, null, "Loading recommendations...");
@@ -901,7 +931,18 @@
         (props.combineLocalSections ? ["local", "remote"] : ["unwatched", "watched", "remote"]).map((name) => {
           const entries = sections[name];
           if (!entries.length) return null;
-          return renderRecommendationSection(name, entries, props.sectionTitles[name], controlsFor(name));
+          return renderRecommendationSection(
+            name,
+            entries,
+            props.sectionTitles[name],
+            controlsFor(name),
+            componentsLoading ? null : PluginApi.components.SceneCard,
+            {
+              onLocalSelectionChanged,
+              selectedLocalIds,
+              selecting: selectedLocalIds.size > 0,
+            },
+          );
         })
       );
     }
