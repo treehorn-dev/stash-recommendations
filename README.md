@@ -166,6 +166,56 @@ The raw plugin exposes these tasks:
 
 The rating hook is `capture-rating` on `Scene.Update.Post`.
 
+## Better Scene Card Integration
+
+When [Better Scene Card](https://github.com/treehorn-dev/stash-better-scene-card)
+is installed, Stash Recommendations publishes a page-local cached value
+provider named `stash-recommendations.predicted-rating`. It supplies a
+personal predicted rating on the same `0..5` scale as Stash only for locally
+resolved recommendation scenes. It does not issue network requests from card
+rendering and is absent for cold-start accounts or scenes without a prediction.
+
+Paste this into **Better Scene Card > Chip Slots** to show local rating first,
+then the recommendation prediction when no local rating exists, plus an O/play
+score normalized to `0..99`:
+
+```json
+[
+  {
+    "label": { "type": "icon", "name": "star" },
+    "value": {
+      "type": "function",
+      "body": "const local = Number(scene.rating100); return local > 0 ? local / 20 : helpers.value('stash-recommendations.predicted-rating', scene);"
+    },
+    "mode": {
+      "type": "function",
+      "body": "return Number(scene.rating100) > 0 ? 'filled' : 'border';"
+    },
+    "fill": { "color": "#000000", "alpha": 0.65 },
+    "color": {
+      "type": "scale",
+      "min": { "value": 0, "color": "#b59a68" },
+      "mid": { "value": 2.5, "color": "#ffcc00" },
+      "max": { "value": 5, "color": "#ff0000" }
+    }
+  },
+  {
+    "label": { "type": "text", "value": "O/P" },
+    "value": {
+      "type": "function",
+      "body": "const plays = Number(scene.play_count) || 0; const oCount = Number(scene.o_counter) || 0; return plays > 0 ? Math.min(99, Math.max(0, Math.round((oCount / plays) * 99))) : 0;"
+    },
+    "mode": "filled",
+    "color": {
+      "type": "scale",
+      "min": { "value": 0, "color": "#000000" },
+      "mid": { "value": 50, "color": "#800000" },
+      "max": { "value": 99, "color": "#ff0000" }
+    }
+  }
+]
+```
+
 ## Explicit Sync and Status
 
 The `*-confirmed` tasks enqueue work. `deliver-outbox` is independent: hooks

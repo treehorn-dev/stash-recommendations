@@ -7,6 +7,27 @@
     api.register(root.PluginApi, root);
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  const PREDICTED_RATING_VALUE = "stash-recommendations.predicted-rating";
+
+  function cachePredictedRatings(entries, scores) {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (entry?.kind !== "local" || entry.scene?.id == null) continue;
+      const rating = Number(entry.item?.predicted_rating);
+      if (Number.isFinite(rating)) scores.set(String(entry.scene.id), rating);
+    }
+  }
+
+  function registerPredictedRatingProvider(root, scores) {
+    const api = root?.StashBetterSceneCard;
+    if (!api || typeof api.registerValue !== "function") return false;
+    return api.registerValue(PREDICTED_RATING_VALUE, {
+      get({ scene }) {
+        return scene?.id == null ? undefined : scores.get(String(scene.id));
+      },
+      load() {},
+    });
+  }
+
   function fetchRelated(contentKeys, runPluginOperation, limit = 20) {
     return runPluginOperation({
       mode: "fetch-related",
@@ -249,6 +270,8 @@
     const { NavLink } = PluginApi.libraries.ReactRouterDOM;
     const getClient = PluginApi.utils.StashService.getClient;
     const SharedComponents = root.StashPluginComponents;
+    const predictedRatings = new Map();
+    registerPredictedRatingProvider(root, predictedRatings);
     const RUN_PLUGIN_OPERATION = Apollo.gql`
       mutation RunPluginOperation($plugin_id: ID!, $args: Map) {
         runPluginOperation(plugin_id: $plugin_id, args: $args)
@@ -870,6 +893,8 @@
             if (!active) {
               return;
             }
+            cachePredictedRatings(resolved, predictedRatings);
+            registerPredictedRatingProvider(root, predictedRatings);
             setState((previous) => ({
               error: "",
               items: options.append ? [...previous.items, ...resolved] : resolved,
@@ -1127,6 +1152,7 @@
   }
 
   return {
+    cachePredictedRatings,
     describeLocalScene,
     fetchForYou,
     fetchRelated,
@@ -1134,6 +1160,7 @@
     formatRecommendationReasons,
     partitionRecommendations,
     recommendationBadgeCells,
+    registerPredictedRatingProvider,
     register,
     resolveLocalRecommendations,
     sceneCountRailEntries,

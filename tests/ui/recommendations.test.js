@@ -21,8 +21,34 @@ const {
   fetchRelated,
   forYouOffsetForPage,
   partitionRecommendations,
+  cachePredictedRatings,
+  registerPredictedRatingProvider,
   resolveLocalRecommendations,
 } = require(modulePath);
+
+test("predicted rating provider exposes cached local recommendation scores to Better Scene Card", () => {
+  const scores = new Map();
+  cachePredictedRatings([
+    {
+      kind: "local",
+      item: { predicted_rating: 4.2 },
+      scene: { id: "44" },
+    },
+  ], scores);
+  let provider;
+
+  assert.equal(registerPredictedRatingProvider({
+    StashBetterSceneCard: {
+      registerValue(name, valueProvider) {
+        assert.equal(name, "stash-recommendations.predicted-rating");
+        provider = valueProvider;
+        return true;
+      },
+    },
+  }, scores), true);
+  assert.equal(provider.get({ scene: { id: "44" } }), 4.2);
+  assert.equal(provider.get({ scene: { id: "missing" } }), undefined);
+});
 
 test("formatRecommendationReasons turns model reason codes into one user-facing explanation", () => {
   assert.equal(
